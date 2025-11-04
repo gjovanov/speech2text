@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Streaming Transcription - All Servers</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        h1 { text-align: center; color: #333; margin-bottom: 30px; }
+        .audio-section {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .status-badges {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .status-badge.connected { background: #28a745; color: white; }
+        .status-badge.disconnected { background: #dc3545; color: white; }
+        .status-badge.streaming { background: #ffc107; color: #000; }
+
+        .full-transcript-panel {
+            background: #fff9e6;
+            padding: 30px;
+            border-radius: 12px;
+            border: 2px solid #ffc107;
+            margin-bottom: 30px;
+        }
+
+        .full-transcript-panel h2 {
+            color: #f57c00;
+            margin: 0 0 20px 0;
+            font-size: 1.4em;
+        }
+
+        .full-transcript-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .full-transcript-box {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .full-transcript-box.voxtral { border-left-color: #fd7e14; }
+        .full-transcript-box.parakeet { border-left-color: #ff6b6b; }
+        .full-transcript-box.whisper { border-left-color: #4ecdc4; }
+        .full-transcript-box.faster { border-left-color: #95e1d3; }
+
+        .full-transcript-box h3 {
+            margin: 0 0 15px 0;
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+
+        .full-transcript-box h3.voxtral { color: #fd7e14; }
+        .full-transcript-box h3.parakeet { color: #ff6b6b; }
+        .full-transcript-box h3.whisper { color: #4ecdc4; }
+        .full-transcript-box h3.faster { color: #95e1d3; }
+
+        .full-transcript-text {
+            font-size: 1em;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .transcription-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .transcription-box {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 12px;
+            border-left: 4px solid #007bff;
+            min-height: 300px;
+        }
+        .transcription-box.active {
+            border-left-color: #28a745;
+            background: #e8f5e9;
+        }
+        .transcription-box.voxtral { border-left-color: #fd7e14; }
+        .transcription-box.parakeet { border-left-color: #ff6b6b; }
+        .transcription-box.whisper { border-left-color: #4ecdc4; }
+        .transcription-box.faster { border-left-color: #95e1d3; }
+
+        .server-name {
+            font-size: 1.2em;
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+        .server-name.voxtral { color: #fd7e14; }
+        .server-name.parakeet { color: #ff6b6b; }
+        .server-name.whisper { color: #4ecdc4; }
+        .server-name.faster { color: #95e1d3; }
+
+        .transcription-text {
+            font-size: 1.1em;
+            line-height: 1.6;
+            color: #333;
+            min-height: 150px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .sentence {
+            display: block;
+            margin: 8px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 6px;
+            animation: fadeIn 0.5s;
+        }
+        .sentence.partial {
+            background: #fff3cd;
+            font-style: italic;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .stats {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 15px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        audio { width: 100%; max-width: 600px; margin: 20px 0; }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #2196f3;
+        }
+        .audio-selector {
+            margin: 20px 0;
+        }
+        .audio-selector label {
+            font-weight: 600;
+            margin-right: 10px;
+            color: #333;
+        }
+        .audio-selector select {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 2px solid #667eea;
+            font-size: 14px;
+            min-width: 300px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Real-time Streaming Transcription - All Servers</h1>
+
+        <div class="audio-section">
+            <h3>Test Audio (German)</h3>
+
+            <div class="audio-selector">
+                <label for="audioSelect">Select Audio:</label>
+                <select id="audioSelect">
+                    <option value="media/health-german.wav">Health & Nutrition</option>
+                    <option value="media/Erdbeben-auf-Haiti.wav">Erdbeben auf Haiti</option>
+                    <option value="media/hobbies-ge.wav">Hobbies</option>
+                    <option value="media/beach-german.wav">Beach</option>
+                    <option value="media/TV-sampleanswers-german.wav">TV Sample Answers</option>
+                    <option value="media/neverendingstory-german.wav">Never Ending Story</option>
+                    <option value="media/eenymeeny-german.wav">Eeny Meeny 1</option>
+                    <option value="media/eenymeeny2-german.wav">Eeny Meeny 2</option>
+                    <option value="media/eenymeeny3-german.wav">Eeny Meeny 3</option>
+                </select>
+            </div>
+
+            <audio id="audioPlayer" controls>
+                <source src="media/health-german.wav" type="audio/wav">
+            </audio>
+
+            <div class="status-badges">
+                <span class="status-badge disconnected" id="status-voxtral">Voxtral: Disconnected</span>
+                <span class="status-badge disconnected" id="status-parakeet">Parakeet v3: Disconnected</span>
+                <span class="status-badge disconnected" id="status-whisper">Whisper: Disconnected</span>
+                <span class="status-badge disconnected" id="status-faster">Faster-Whisper: Disconnected</span>
+            </div>
+
+            <div class="info">
+                <strong>📡 Real-time Streaming Mode - All 4 Servers</strong><br>
+                Comparing Voxtral (Mistral Cloud), Parakeet TDT v3 (8.5x), Whisper Small, and Faster-Whisper (3x) with spaCy.<br>
+                Transcriptions appear every ~3.5 seconds with accumulated context for better accuracy.
+            </div>
+        </div>
+
+        <!-- Full Accumulated Transcript Panel -->
+        <div class="full-transcript-panel">
+            <h2>📝 Full Accumulated Transcript</h2>
+            <div class="full-transcript-grid">
+                <div class="full-transcript-box voxtral">
+                    <h3 class="voxtral">🔶 Voxtral (Cloud API)</h3>
+                    <div class="full-transcript-text" id="full-text-voxtral">
+                        <em style="color: #999;">Waiting for audio...</em>
+                    </div>
+                </div>
+                <div class="full-transcript-box parakeet">
+                    <h3 class="parakeet">🚀 Parakeet TDT v3</h3>
+                    <div class="full-transcript-text" id="full-text-parakeet">
+                        <em style="color: #999;">Waiting for audio...</em>
+                    </div>
+                </div>
+                <div class="full-transcript-box whisper">
+                    <h3 class="whisper">🎯 Whisper Small</h3>
+                    <div class="full-transcript-text" id="full-text-whisper">
+                        <em style="color: #999;">Waiting for audio...</em>
+                    </div>
+                </div>
+                <div class="full-transcript-box faster">
+                    <h3 class="faster">⚡ Faster-Whisper + spaCy</h3>
+                    <div class="full-transcript-text" id="full-text-faster">
+                        <em style="color: #999;">Waiting for audio...</em>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="transcription-grid">
+            <div class="transcription-box voxtral" id="voxtral-box">
+                <div class="server-name voxtral">🔶 Voxtral (Mistral Cloud API)</div>
+                <div class="transcription-text" id="text-voxtral">
+                    <em>Press play to start streaming...</em>
+                </div>
+                <div class="stats" id="stats-voxtral"></div>
+            </div>
+
+            <div class="transcription-box parakeet" id="parakeet-box">
+                <div class="server-name parakeet">🚀 Parakeet TDT v3 (8.5x Speed)</div>
+                <div class="transcription-text" id="text-parakeet">
+                    <em>Press play to start streaming...</em>
+                </div>
+                <div class="stats" id="stats-parakeet"></div>
+            </div>
+
+            <div class="transcription-box whisper" id="whisper-box">
+                <div class="server-name whisper">🎯 Whisper Small</div>
+                <div class="transcription-text" id="text-whisper">
+                    <em>Press play to start streaming...</em>
+                </div>
+                <div class="stats" id="stats-whisper"></div>
+            </div>
+
+            <div class="transcription-box faster" id="faster-box">
+                <div class="server-name faster">⚡ Faster-Whisper + spaCy (3x Speed)</div>
+                <div class="transcription-text" id="text-faster">
+                    <em>Press play to start streaming...</em>
+                </div>
+                <div class="stats" id="stats-faster"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const servers = [
+            { name: 'voxtral', url: 'ws://localhost:5000/transcribe', displayName: 'Voxtral' },
+            { name: 'faster', url: 'ws://localhost:5001/transcribe', displayName: 'Faster-Whisper' },
+            { name: 'parakeet', url: 'ws://localhost:5002/transcribe', displayName: 'Parakeet v3' }
+        ];
+
+        const audioPlayer = document.getElementById('audioPlayer');
+        const connections = {};
+        const transcripts = {
+            voxtral: [],
+            parakeet: [],
+            whisper: [],
+            faster: []
+        };
+        const fullTranscripts = {
+            voxtral: '',
+            parakeet: '',
+            whisper: '',
+            faster: ''
+        };
+
+        let audioContext;
+        let streamInterval;
+        let audioBuffer;
+        let currentPosition = 0;
+
+        // Initialize WebSocket connections
+        servers.forEach(server => {
+            const ws = new WebSocket(server.url);
+            connections[server.name] = ws;
+
+            ws.onopen = () => {
+                console.log(`✅ ${server.displayName} connected`);
+                updateStatus(server.name, 'connected');
+                updateText(server.name, '<em>Connected! Press play to start streaming...</em>');
+
+                // Configure for German streaming
+                ws.send(JSON.stringify({
+                    type: 'configure',
+                    language: 'german',
+                    task: 'transcribe',
+                    returnTimestamps: true
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log(`[${server.displayName}] Message type: ${data.type}`, data);
+
+                if (data.type === 'partial_transcription' || data.type === 'transcription') {
+                    console.log(`[${server.displayName}] Received transcription: ${data.text}`);
+
+                    if (data.text && data.text.trim()) {
+                        // Update full transcript with complete text
+                        fullTranscripts[server.name] = data.text.trim();
+                        renderFullTranscript(server.name);
+
+                        // Extract only the last sentence for the streaming view
+                        const lastSentence = getLastSentence(data.text.trim());
+
+                        if (lastSentence) {
+                            // Check if this is a duplicate of the previous sentence
+                            const previousTranscripts = transcripts[server.name];
+                            const isDuplicate = previousTranscripts.length > 0 &&
+                                previousTranscripts[previousTranscripts.length - 1].text === lastSentence;
+
+                            if (!isDuplicate) {
+                                transcripts[server.name].push({
+                                    text: lastSentence,
+                                    isPartial: data.isPartial || data.type === 'partial_transcription'
+                                });
+                                renderTranscripts(server.name);
+                                console.log(`[${server.displayName}] New sentence: ${lastSentence}`);
+                            } else {
+                                console.log(`[${server.displayName}] Skipping duplicate sentence`);
+                            }
+                        }
+                    }
+
+                    if (data.performance) {
+                        updateStats(server.name, data.performance, transcripts[server.name].length);
+                    }
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error(`❌ ${server.displayName} error:`, error);
+                updateStatus(server.name, 'disconnected');
+                updateText(server.name, '<em style="color: red;">Connection error!</em>');
+            };
+
+            ws.onclose = () => {
+                console.log(`🔌 ${server.displayName} closed`);
+                updateStatus(server.name, 'disconnected');
+            };
+        });
+
+        function updateStatus(serverName, status) {
+            const badge = document.getElementById(`status-${serverName}`);
+            badge.className = `status-badge ${status}`;
+            const statusText = {
+                'connected': 'Connected ✓',
+                'disconnected': 'Disconnected',
+                'streaming': 'Streaming 🔴'
+            };
+            const displayName = servers.find(s => s.name === serverName).displayName;
+            badge.textContent = `${displayName}: ${statusText[status]}`;
+        }
+
+        function updateText(serverName, html) {
+            document.getElementById(`text-${serverName}`).innerHTML = html;
+        }
+
+        function getLastSentence(text) {
+            // Split by sentence-ending punctuation
+            const sentences = text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+
+            if (sentences.length === 0) {
+                return text; // Return full text if no sentences detected
+            }
+
+            // Return the last sentence with its punctuation
+            const lastSentence = sentences[sentences.length - 1];
+
+            // Find the punctuation that ended this sentence
+            const punctuationMatch = text.match(/[.!?]+\s*$/);
+            const punctuation = punctuationMatch ? punctuationMatch[0].trim() : '.';
+
+            return lastSentence + punctuation;
+        }
+
+        function updateStats(serverName, performance, segmentCount) {
+            const statsEl = document.getElementById(`stats-${serverName}`);
+            statsEl.innerHTML = `
+                <span>⏱️ ${performance.processingTime}</span>
+                <span>⚡ ${performance.rtfx}</span>
+                <span>📊 Segments: ${segmentCount}</span>
+            `;
+        }
+
+        function renderTranscripts(serverName) {
+            const textEl = document.getElementById(`text-${serverName}`);
+            const items = transcripts[serverName];
+
+            if (items.length === 0) {
+                textEl.innerHTML = '<em style="color: #999;">Listening...</em>';
+            } else {
+                textEl.innerHTML = items.map(item =>
+                    `<span class="sentence ${item.isPartial ? 'partial' : ''}">${item.text}</span>`
+                ).join('');
+            }
+        }
+
+        function renderFullTranscript(serverName) {
+            const fullTextEl = document.getElementById(`full-text-${serverName}`);
+            const text = fullTranscripts[serverName];
+
+            if (text) {
+                fullTextEl.textContent = text;
+                // Auto-scroll to bottom
+                fullTextEl.parentElement.scrollTop = fullTextEl.parentElement.scrollHeight;
+            } else {
+                fullTextEl.innerHTML = '<em style="color: #999;">Listening...</em>';
+            }
+        }
+
+        async function loadAudioBuffer() {
+            if (audioBuffer) return audioBuffer;
+
+            try {
+                // Get audio source from player
+                const audioSrc = audioPlayer.src || audioPlayer.currentSrc;
+                console.log(`Loading audio from: ${audioSrc}`);
+
+                const response = await fetch(audioSrc);
+                const arrayBuffer = await response.arrayBuffer();
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+                console.log(`Audio loaded: ${audioBuffer.duration.toFixed(2)}s at ${audioBuffer.sampleRate}Hz`);
+                return audioBuffer;
+            } catch (error) {
+                console.error('Error loading audio:', error);
+                return null;
+            }
+        }
+
+        function convertToPCM16(audioBuffer) {
+            const sampleRate = audioBuffer.sampleRate;
+            const targetSampleRate = 16000;
+
+            // Get mono channel
+            let channelData;
+            if (audioBuffer.numberOfChannels === 1) {
+                channelData = audioBuffer.getChannelData(0);
+            } else {
+                const left = audioBuffer.getChannelData(0);
+                const right = audioBuffer.getChannelData(1);
+                channelData = new Float32Array(left.length);
+                for (let i = 0; i < left.length; i++) {
+                    channelData[i] = (left[i] + right[i]) / 2;
+                }
+            }
+
+            // Resample if needed
+            let resampled;
+            if (sampleRate !== targetSampleRate) {
+                const ratio = sampleRate / targetSampleRate;
+                const newLength = Math.floor(channelData.length / ratio);
+                resampled = new Float32Array(newLength);
+
+                for (let i = 0; i < newLength; i++) {
+                    const srcIndex = i * ratio;
+                    const srcIndexFloor = Math.floor(srcIndex);
+                    const srcIndexCeil = Math.min(srcIndexFloor + 1, channelData.length - 1);
+                    const t = srcIndex - srcIndexFloor;
+                    resampled[i] = channelData[srcIndexFloor] * (1 - t) + channelData[srcIndexCeil] * t;
+                }
+            } else {
+                resampled = channelData;
+            }
+
+            // Convert to 16-bit PCM
+            const pcm16 = new Int16Array(resampled.length);
+            for (let i = 0; i < resampled.length; i++) {
+                const s = Math.max(-1, Math.min(1, resampled[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+
+            return pcm16.buffer;
+        }
+
+        async function startStreaming() {
+            const buffer = await loadAudioBuffer();
+            if (!buffer) return;
+
+            const pcmData = convertToPCM16(buffer);
+            currentPosition = 0;
+
+            // Clear transcripts
+            transcripts.voxtral = [];
+            transcripts.parakeet = [];
+            transcripts.whisper = [];
+            transcripts.faster = [];
+
+            // Clear full transcripts
+            fullTranscripts.voxtral = '';
+            fullTranscripts.parakeet = '';
+            fullTranscripts.whisper = '';
+            fullTranscripts.faster = '';
+
+            // Update UI
+            servers.forEach(server => {
+                updateText(server.name, '<em>Listening...</em>');
+                document.getElementById(`full-text-${server.name}`).innerHTML = '<em style="color: #999;">Listening...</em>';
+                document.getElementById(`${server.name}-box`).classList.add('active');
+                updateStatus(server.name, 'streaming');
+            });
+
+            // Stream chunks synchronized with playback
+            // Larger chunks provide more context for better accuracy
+            const chunkSize = 16000 * 2 * 3.5; // 3.5 seconds of audio at 16kHz, 16-bit
+            const intervalMs = 3500; // Send every 3.5 seconds
+
+            streamInterval = setInterval(() => {
+                if (audioPlayer.paused || currentPosition >= pcmData.byteLength) {
+                    stopStreaming();
+                    return;
+                }
+
+                const chunk = pcmData.slice(
+                    currentPosition,
+                    Math.min(currentPosition + chunkSize, pcmData.byteLength)
+                );
+
+                const chunkDuration = (chunk.byteLength / (16000 * 2)).toFixed(1);
+                console.log(`📤 Sending chunk = ${chunkDuration}s of audio to all servers`);
+
+                // Send to all servers
+                Object.entries(connections).forEach(([name, ws]) => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(chunk);
+                        ws.send(JSON.stringify({ type: 'transcribe_stream' }));
+                    }
+                });
+
+                currentPosition += chunkSize;
+            }, intervalMs);
+        }
+
+        async function stopStreaming() {
+            if (streamInterval) {
+                clearInterval(streamInterval);
+                streamInterval = null;
+            }
+
+            console.log('🛑 Stopping streaming and processing final audio chunk...');
+            console.log(`   Current position: ${(currentPosition / (16000 * 2)).toFixed(1)}s`);
+
+            // Process any remaining audio that hasn't been sent yet
+            const buffer = await loadAudioBuffer();
+            if (buffer) {
+                const pcmData = convertToPCM16(buffer);
+                console.log(`   Total audio length: ${(pcmData.byteLength / (16000 * 2)).toFixed(1)}s`);
+
+                if (currentPosition < pcmData.byteLength) {
+                    const remainingChunk = pcmData.slice(currentPosition);
+
+                    if (remainingChunk.byteLength > 0) {
+                        const duration = (remainingChunk.byteLength / (16000 * 2)).toFixed(1);
+                        console.log(`📤 Sending final chunk = ${duration}s of audio to all servers`);
+
+                        // Send remaining audio to all servers
+                        Object.entries(connections).forEach(([name, ws]) => {
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(remainingChunk);
+                            }
+                        });
+
+                        // Wait for the audio to be buffered
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                        // Request final transcription from all servers
+                        console.log('📝 Requesting final transcription from all servers...');
+                        Object.entries(connections).forEach(([name, ws]) => {
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(JSON.stringify({ type: 'transcribe_stream' }));
+                            }
+                        });
+
+                        // Wait for transcription to complete
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        console.log('✅ No remaining audio to send');
+                    }
+                } else {
+                    console.log('✅ All audio already sent');
+                }
+            }
+
+            servers.forEach(server => {
+                document.getElementById(`${server.name}-box`).classList.remove('active');
+                updateStatus(server.name, 'connected');
+            });
+        }
+
+        // Audio selection change handler
+        const audioSelect = document.getElementById('audioSelect');
+        audioSelect.addEventListener('change', (e) => {
+            const selectedFile = e.target.value;
+            console.log(`Selected audio: ${selectedFile}`);
+
+            // Stop current playback (this will trigger the pause event which stops streaming)
+            audioPlayer.pause();
+
+            // Stop streaming interval without sending final chunks
+            if (streamInterval) {
+                clearInterval(streamInterval);
+                streamInterval = null;
+            }
+
+            // Clear transcripts
+            servers.forEach(server => {
+                transcripts[server.name] = [];
+                fullTranscripts[server.name] = '';
+                updateText(server.name, '<em>Select audio and press play...</em>');
+                document.getElementById(`full-text-${server.name}`).innerHTML = '<em style="color: #999;">Waiting for audio...</em>';
+                document.getElementById(`${server.name}-box`).classList.remove('active');
+            });
+
+            // Send clear command to all servers to reset their buffers
+            Object.entries(connections).forEach(([name, ws]) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'clear' }));
+                }
+            });
+
+            // Clear local buffer
+            audioBuffer = null;
+            currentPosition = 0;
+
+            // Update audio source and wait for it to be ready
+            audioPlayer.src = selectedFile;
+            audioPlayer.load();
+        });
+
+        // Event listeners
+        audioPlayer.addEventListener('play', () => {
+            console.log('Audio playing - starting streaming to all servers');
+            startStreaming();
+        });
+
+        audioPlayer.addEventListener('pause', () => {
+            console.log('Audio paused - stopping streaming');
+            // Just stop the interval, don't send final chunks
+            if (streamInterval) {
+                clearInterval(streamInterval);
+                streamInterval = null;
+            }
+            // Update UI status
+            servers.forEach(server => {
+                document.getElementById(`${server.name}-box`).classList.remove('active');
+                updateStatus(server.name, 'connected');
+            });
+        });
+
+        audioPlayer.addEventListener('ended', () => {
+            console.log('Audio ended');
+            stopStreaming();
+        });
+
+        audioPlayer.addEventListener('seeked', () => {
+            // Reset on seek
+            if (!audioPlayer.paused) {
+                stopStreaming();
+                startStreaming();
+            }
+        });
+
+        // Audio element state handlers for debugging
+        audioPlayer.addEventListener('loadstart', () => {
+            console.log('🔄 Audio loading started...');
+        });
+
+        audioPlayer.addEventListener('canplay', () => {
+            console.log('✅ Audio is ready to play');
+        });
+
+        audioPlayer.addEventListener('error', (e) => {
+            console.error('❌ Audio loading error:', audioPlayer.error);
+            console.error('   Error code:', audioPlayer.error?.code);
+            console.error('   Error message:', audioPlayer.error?.message);
+            console.error('   Current src:', audioPlayer.src);
+
+            servers.forEach(server => {
+                updateText(server.name, '<em style="color: red;">Audio loading failed! Check console.</em>');
+            });
+        });
+
+        audioPlayer.addEventListener('stalled', () => {
+            console.warn('⚠️ Audio loading stalled');
+        });
+    </script>
+</body>
+</html>

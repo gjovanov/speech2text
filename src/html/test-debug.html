@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Realtime Transcription</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #output { margin-top: 20px; border: 1px solid #ccc; padding: 10px; height: 400px; overflow-y: scroll; }
+        #output div { margin: 5px 0; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Debug Test - Parakeet & Whisper</h1>
+    <div id="status">Initializing...</div>
+    <audio id="audio" controls>
+        <source src="health-german.mp3" type="audio/mpeg">
+    </audio>
+    <button onclick="manualTest()">Manual Test (Send Audio Now)</button>
+    <div id="output"></div>
+
+    <script>
+        const log = (msg, isError = false) => {
+            const time = new Date().toLocaleTimeString();
+            console.log(msg);
+            const div = document.createElement('div');
+            div.textContent = time + ': ' + msg;
+            if (isError) div.className = 'error';
+            document.getElementById('output').appendChild(div);
+            document.getElementById('output').scrollTop = document.getElementById('output').scrollHeight;
+        };
+
+        const servers = [
+            { name: 'Parakeet', url: 'ws://localhost:3001/transcribe' },
+            { name: 'Whisper', url: 'ws://localhost:3002/transcribe' }
+        ];
+
+        const connections = {};
+
+        servers.forEach(server => {
+            log('Connecting to ' + server.name + '...');
+            const ws = new WebSocket(server.url);
+
+            ws.onopen = () => {
+                log('Connected to ' + server.name, false);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    log(server.name + ' received ' + data.type);
+
+                    if (data.type === 'transcription') {
+                        log('TRANSCRIPTION from ' + server.name + ': ' + data.text.substring(0, 100), false);
+                    }
+                    if (data.type === 'error') {
+                        log('ERROR from ' + server.name + ': ' + data.message, true);
+                    }
+                } catch (e) {
+                    log(server.name + ' parse error: ' + e, true);
+                }
+            };
+
+            ws.onerror = (error) => {
+                log(server.name + ' connection error', true);
+            };
+
+            connections[server.name] = ws;
+        });
+
+        async function manualTest() {
+            log('Starting manual test...');
+
+            try {
+                // Load audio file
+                const response = await fetch('health-german.mp3');
+                const arrayBuffer = await response.arrayBuffer();
+                log('Loaded audio: ' + arrayBuffer.byteLength + ' bytes');
+
+                // Decode audio
+                const audioContext = new AudioContext();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                log('Decoded: ' + audioBuffer.duration.toFixed(2) + 's, ' + audioBuffer.sampleRate + 'Hz');
+
+                // Convert to PCM 16-bit mono 16kHz
+                const pcmData = convertToPCM16(audioBuffer);
+                log('Converted to PCM: ' + pcmData.byteLength + ' bytes');
+
+                // Send to servers in chunks
+                const chunkSize = 32000;
+                let chunkCount = 0;
+                for (let i = 0; i < pcmData.byteLength; i += chunkSize) {
+                    const chunk = pcmData.slice(i, Math.min(i + chunkSize, pcmData.byteLength));
+                    Object.values(connections).forEach(ws => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(chunk);
+                        }
+                    });
+                    chunkCount++;
+                }
+                log('Sent ' + chunkCount + ' audio chunks');
+
+                // Wait then request transcription
+                setTimeout(() => {
+                    log('Requesting transcription from all servers...');
+                    Object.entries(connections).forEach(([name, ws]) => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'transcribe' }));
+                            log('Sent transcribe request to ' + name);
+                        } else {
+                            log('Cannot send to ' + name + ' - not connected', true);
+                        }
+                    });
+                }, 2000);
+
+            } catch (error) {
+                log('Error in manual test: ' + error, true);
+            }
+        }
+
+        function convertToPCM16(audioBuffer) {
+            const sampleRate = audioBuffer.sampleRate;
+            const targetSampleRate = 16000;
+
+            // Get mono channel
+            let channelData;
+            if (audioBuffer.numberOfChannels === 1) {
+                channelData = audioBuffer.getChannelData(0);
+            } else {
+                const left = audioBuffer.getChannelData(0);
+                const right = audioBuffer.getChannelData(1);
+                channelData = new Float32Array(left.length);
+                for (let i = 0; i < left.length; i++) {
+                    channelData[i] = (left[i] + right[i]) / 2;
+                }
+            }
+
+            // Resample if needed
+            let resampled;
+            if (sampleRate !== targetSampleRate) {
+                const ratio = sampleRate / targetSampleRate;
+                const newLength = Math.floor(channelData.length / ratio);
+                resampled = new Float32Array(newLength);
+
+                for (let i = 0; i < newLength; i++) {
+                    const srcIndex = i * ratio;
+                    const srcIndexFloor = Math.floor(srcIndex);
+                    const srcIndexCeil = Math.min(srcIndexFloor + 1, channelData.length - 1);
+                    const t = srcIndex - srcIndexFloor;
+                    resampled[i] = channelData[srcIndexFloor] * (1 - t) + channelData[srcIndexCeil] * t;
+                }
+            } else {
+                resampled = channelData;
+            }
+
+            // Convert to 16-bit PCM
+            const pcm16 = new Int16Array(resampled.length);
+            for (let i = 0; i < resampled.length; i++) {
+                const s = Math.max(-1, Math.min(1, resampled[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+
+            return pcm16.buffer;
+        }
+
+        // Auto-run test after 2 seconds
+        setTimeout(() => {
+            log('Auto-running test in 2 seconds...');
+            setTimeout(manualTest, 2000);
+        }, 2000);
+    </script>
+</body>
+</html>

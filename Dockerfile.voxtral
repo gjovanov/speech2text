@@ -1,0 +1,25 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    websockets \
+    numpy \
+    soundfile \
+    mistralai
+
+# Copy server file
+COPY src/voxtral-api-server.py .
+
+# Expose port
+EXPOSE 5000
+
+# Run server
+CMD ["python3", "voxtral-api-server.py"]

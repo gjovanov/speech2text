@@ -1,0 +1,26 @@
+FROM nvcr.io/nvidia/pytorch:23.10-py3
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    websockets \
+    numpy \
+    soundfile \
+    scipy \
+    nemo_toolkit[asr]
+
+# Copy server file
+COPY src/parakeet-python-server.py .
+
+# Expose port
+EXPOSE 5002
+
+# Run server
+CMD ["python3", "parakeet-python-server.py"]

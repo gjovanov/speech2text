@@ -1,0 +1,408 @@
+# 🎙️ Real-Time German Audio Transcription Showdown
+
+**Or: How I Learned to Stop Worrying and Love the Streaming WebSockets**
+
+Ever wondered what would happen if you put 3 different speech-to-text AI models in a cage match? No? Well, I did it anyway, and it's pretty awesome!
+
+This project streams German audio through **3 concurrent transcription servers** and displays the results in real-time. It's like watching a rap battle, but with AI models trying to understand German health advice about vegetables. 🥦
+
+## 🎯 What Does This Thing Do?
+
+Imagine you're listening to German audio, and you want to see what's being said... but you're indecisive and can't pick just ONE transcription service. This project says "Why choose?" and transcribes your audio through:
+
+1. **Voxtral Mini** (Mistral Cloud API) - The speedster. Runs in the cloud at 24x real-time speed. It's basically The Flash of transcription.
+2. **Parakeet TDT v3** (NVIDIA) - The GPU enthusiast. Runs on your graphics card at 8.5x speed. Your gaming rig is now a transcription powerhouse!
+3. **Faster-Whisper** (CPU with spaCy) - The sentence perfectionist. Uses spaCy to detect German sentence boundaries at 3x speed.
+
+All three models transcribe the same audio **simultaneously**, and you can watch them race to see who finishes first (spoiler: Voxtral usually wins, but Parakeet puts up a good fight).
+
+## 🚀 Why Would Anyone Want This?
+
+Great question! Here are some totally legitimate use cases:
+
+- **Model comparison**: See which model understands German best
+- **Speed benchmarking**: Watch them race! Place bets!
+- **Academic research**: "I need it for my thesis" (sure you do)
+- **Showing off**: "Look what my computer can do!"
+- **Trust issues**: Can't trust just one AI? Get four opinions!
+
+## 🎬 The Demo
+
+The project includes two web interfaces:
+
+### 1. **Real-Time Streaming Mode** (`realtime-transcription-streaming.html`)
+Watch transcriptions appear word-by-word as the audio plays. It's like watching subtitles being written in real-time by three different people. The suspense! The drama! The occasional spelling mistakes!
+
+### 2. **Comparison Mode** (`realtime-transcription.html`)
+Press a button, wait a few seconds, and BAM! All three complete transcriptions side-by-side. Great for comparing accuracy (and finding out which model thinks "Ernährung" sounds like "Entenbraten").
+
+## 🛠️ Prerequisites
+
+Before you embark on this journey, you'll need:
+
+### Software Requirements
+
+- **Python 3.10+** - Because we're not savages
+- **FFmpeg** - The Swiss Army knife of media processing
+- **CUDA** (optional) - If you have an NVIDIA GPU and want Parakeet to go brrrr
+
+### Hardware Requirements
+
+- **RAM**: At least 16GB (those models are chonky)
+- **GPU** (recommended): NVIDIA with 4GB+ VRAM for Parakeet
+- **Disk space**: ~10GB for all the models
+- **Patience**: Especially during first-time model downloads
+
+### API Keys
+
+- **Mistral API key** - For Voxtral (get one at [console.mistral.ai](https://console.mistral.ai))
+  - Cost: ~$0.001 per minute of audio (cheaper than your daily coffee)
+
+## 📦 Installation
+
+Let's get this party started! Open your terminal and channel your inner hacker:
+
+### 1. Install System Dependencies
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install python3-pip ffmpeg portaudio19-dev python3-pyaudio
+```
+
+**macOS:**
+```bash
+brew install python3 ffmpeg portaudio
+```
+
+**Windows:**
+Download FFmpeg from [ffmpeg.org](https://ffmpeg.org/) and add it to your PATH. Or switch to Linux (just kidding... mostly).
+
+### 2. Install Python Dependencies
+
+```bash
+pip install websockets numpy soundfile scipy nemo_toolkit torch faster-whisper mistralai spacy
+```
+
+Then download the German spaCy model:
+```bash
+python -m spacy download de_core_news_sm
+```
+
+### 3. Set Up Your Mistral API Key
+
+Create a `.env` file or set an environment variable:
+
+```bash
+export MISTRAL_API_KEY="your_api_key_here"
+```
+
+Or hardcode it in `voxtral-api-server.py` (but don't commit it to GitHub unless you want your key to become public property).
+
+## 🐳 Running with Docker
+
+### Option 1: CPU-Only (Voxtral + Web UI)
+Perfect for testing or if you don't have an NVIDIA GPU:
+
+```bash
+docker compose -f docker-compose.cpu.yml up -d
+```
+
+This starts:
+- Voxtral server (port 5000) - Uses Mistral Cloud API
+- Web UI (port 8000)
+
+### Option 2: Full Stack with GPU
+Requires NVIDIA GPU and Docker GPU support:
+
+#### Install NVIDIA Container Toolkit first:
+```bash
+# Ubuntu/Debian
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+sudo systemctl restart docker
+```
+
+Then start all services:
+```bash
+docker compose up -d
+```
+
+This starts:
+- Voxtral server (port 5000)
+- Whisper GPU server (port 5001)
+- Parakeet GPU server (port 5002)
+- Web UI (port 8000)
+
+### Docker Commands
+```bash
+# Build all images
+docker compose build
+
+# View logs
+docker compose logs -f voxtral
+docker compose logs -f whisper
+docker compose logs -f parakeet
+
+# Stop all
+docker compose down
+
+# Rebuild and restart
+docker compose up -d --build
+```
+
+## 🎮 Running Without Docker (Manual Setup)
+
+Time to fire up all the engines! You'll need **3 terminal windows** (or use `tmux` like a pro).
+
+### Terminal 1: Voxtral (Cloud API)
+```bash
+cd src && python3 voxtral-api-server.py
+```
+🟢 Listening on: `localhost:5000`
+
+### Terminal 2: Faster-Whisper + spaCy (GPU)
+```bash
+cd src && python3 whisper-gpu-server.py
+```
+🟢 Listening on: `localhost:5001`
+
+### Terminal 3: Parakeet TDT v3 (GPU)
+```bash
+cd src && python3 parakeet-python-server.py
+```
+⚠️ **Warning**: First run downloads ~3GB model. Go make coffee. ☕
+
+🟢 Listening on: `localhost:5002`
+
+### Terminal 4: Static HTTP Server
+```bash
+cd src/html && python3 -m http.server 8000
+```
+🟢 Open: `http://localhost:8000`
+
+**Pro tip**: Run servers in the background with `nohup`:
+```bash
+cd src
+nohup python3 voxtral-api-server.py > voxtral.log 2>&1 &
+nohup python3 whisper-gpu-server.py > whisper-gpu.log 2>&1 &
+nohup python3 parakeet-python-server.py > parakeet.log 2>&1 &
+```
+
+## 🎪 Using the App
+
+### Option 1: Real-Time Streaming
+1. Open `http://localhost:8000/realtime-transcription-streaming.html`
+2. Wait for all 3 servers to connect (you'll see "Connected ✓")
+3. Select an audio file from the dropdown
+4. Press **Play** on the audio player
+5. Watch the magic happen! Transcriptions appear every 3.5 seconds
+
+**Watch for:**
+- 🔶 Voxtral usually finishes sentences first
+- 🚀 Parakeet is hot on its heels
+- ⚡ Faster-Whisper shows complete sentences (thanks, spaCy!)
+
+### Option 2: Side-by-Side Comparison
+1. Open `http://localhost:8000/realtime-transcription.html`
+2. Wait for connections
+3. Click "**Transcribe Now (All Servers)**"
+4. Wait 5-10 seconds
+5. Compare all 3 transcriptions at once
+
+## 📊 The Results
+
+Here's what you can expect from each model:
+
+| Model | Speed | Accuracy | Runs On | Cool Factor |
+|-------|-------|----------|---------|-------------|
+| **Voxtral** | 24x ⚡⚡⚡ | High ✅ | Cloud ☁️ | 🔥🔥🔥 |
+| **Parakeet** | 8.5x ⚡⚡ | Very High ✅✅ | GPU 🎮 | 🔥🔥 |
+| **Faster-Whisper** | 3x ⚡ | High ✅ | CPU 💻 | 🔥 |
+
+**Real-world test results** (38 seconds of German audio):
+- Voxtral: Done in 1.5s
+- Parakeet: Done in 4.5s
+- Faster-Whisper: Done in 12s
+
+## 🎵 Sample Audio Files
+
+The project includes 9 German audio samples in the `media/` folder:
+
+- **health-german.wav** - About healthy eating (spoiler: vegetables are good)
+- **Erdbeben-auf-Haiti.wav** - News about an earthquake
+- **hobbies-ge.wav** - Someone talking about hobbies
+- **beach-german.wav** - Beach-related vocabulary
+- **TV-sampleanswers-german.wav** - TV-related responses
+- **neverendingstory-german.wav** - Die unendliche Geschichte!
+- **eenymeeny-german.wav** - Counting rhyme (three versions)
+
+All files are converted to 16kHz, mono, 16-bit PCM WAV format for optimal processing.
+
+## 🐛 Troubleshooting
+
+### "Parakeet is taking forever to load!"
+First-time loads take 2-5 minutes to download the model. Subsequent starts are faster. Patience, young padawan.
+
+### "Voxtral isn't connecting!"
+Check your API key. Also, make sure you have internet (Voxtral runs in the cloud).
+
+### "Whisper is SO SLOW!"
+Yes. That's because it runs on CPU. Get a GPU or embrace the zen of waiting.
+
+### "All servers disconnected when I changed audio!"
+This is fixed now! The audio dropdown change no longer sends final chunks that close connections. But if you see issues, try refreshing the page.
+
+### "I'm getting WebSocket errors!"
+Make sure all 3 servers are running on their designated ports (5000, 5001, 5002). Check with:
+```bash
+lsof -i :5000,5001,5002
+```
+
+### "Docker GPU containers fail with CUDA errors!"
+This happens on WSL2 or systems without proper GPU passthrough. Solutions:
+
+**Option 1: Use CPU-only Docker setup**
+```bash
+docker compose -f docker-compose.cpu.yml up -d
+```
+This runs only Voxtral (cloud API, no GPU needed) + Web UI.
+
+**Option 2: Run GPU servers natively (not in Docker)**
+```bash
+# Stop Docker containers
+docker compose down
+
+# Run servers directly on your host
+cd src
+python3 voxtral-api-server.py &
+python3 whisper-gpu-server.py &  # Uses host GPU
+python3 parakeet-python-server.py &  # Uses host GPU
+```
+
+**Option 3: Enable GPU in WSL2 (Windows only)**
+Follow [NVIDIA CUDA on WSL2 guide](https://docs.nvidia.com/cuda/wsl-user-guide/index.html)
+
+**Option 4: Install NVIDIA Container Toolkit (Linux)**
+See the Docker installation section above for full instructions.
+
+## 🎓 Technical Details (For the Nerds)
+
+### Architecture
+- **Frontend**: Vanilla JavaScript with Web Audio API
+- **Backend**: 3 Python WebSocket servers
+- **Audio format**: 16kHz, mono, 16-bit PCM
+- **Streaming**: 3.5-second chunks with accumulated context
+- **Buffer management**: 30-second sliding window to prevent memory issues on long audio
+- **Sentence detection**: spaCy for German (Faster-Whisper only)
+
+### WebSocket Protocol
+Each server expects:
+1. **Binary audio data** (PCM 16-bit)
+2. **JSON control messages**:
+   - `configure`: Set language/task
+   - `transcribe`: One-shot transcription
+   - `transcribe_stream`: Real-time streaming
+   - `clear`: Reset audio buffer
+
+### Performance Optimizations
+- Parakeet: GPU-accelerated on CUDA
+- Faster-Whisper: int8 quantization for CPU efficiency
+- Voxtral: Offloaded to Mistral Cloud API (because sometimes the cloud is faster than your basement server)
+- All servers: 30-second sliding window buffer prevents hanging on long audio files
+
+### Audio Format Conversion
+All audio files should be:
+- **Sample Rate**: 16000 Hz
+- **Channels**: Mono (1 channel)
+- **Format**: 16-bit PCM WAV
+
+Convert using FFmpeg:
+```bash
+ffmpeg -i input.mp3 -ar 16000 -ac 1 -c:a pcm_s16le output.wav
+```
+
+Or use Python's `soundfile` library:
+```python
+import soundfile as sf
+from scipy import signal
+import numpy as np
+
+# Read audio
+audio, sr = sf.read('input.mp3')
+
+# Convert stereo to mono
+if len(audio.shape) > 1:
+    audio = audio.mean(axis=1)
+
+# Resample to 16kHz
+if sr != 16000:
+    num_samples = int(len(audio) * 16000 / sr)
+    audio = signal.resample(audio, num_samples)
+
+# Write as 16-bit PCM WAV
+sf.write('output.wav', audio, 16000, subtype='PCM_16')
+```
+
+## 📁 Project Structure
+
+```
+text2speech/
+├── src/
+│   ├── voxtral-api-server.py      # Voxtral Cloud API server (port 5000)
+│   ├── whisper-gpu-server.py      # Faster-Whisper + spaCy server (port 5001)
+│   ├── parakeet-python-server.py  # Parakeet TDT GPU server (port 5002)
+│   └── html/
+│       ├── realtime-transcription-streaming.html  # Real-time streaming UI
+│       ├── realtime-transcription.html            # Side-by-side comparison UI
+│       └── test-debug.html                        # Debug interface for testing
+├── media/                         # Audio samples (9 German audio files)
+├── Dockerfile.voxtral             # Docker image for Voxtral server
+├── Dockerfile.whisper             # Docker image for Whisper server
+├── Dockerfile.parakeet            # Docker image for Parakeet server
+├── Dockerfile.web                 # Docker image for web server
+├── docker-compose.yml             # Docker Compose orchestration
+└── README.md                      # This file!
+```
+
+## 🤝 Contributing
+
+Found a bug? Want to add another model? Pull requests welcome! Just remember:
+- Keep it fun
+- Keep it fast(ish)
+- Keep it working
+
+## 📜 License
+
+MIT License - Do whatever you want with this. Build a startup. Impress your friends. Transcribe your cat's meows.
+
+## 🙏 Credits
+
+Built with:
+- [Mistral AI](https://mistral.ai) - Voxtral Cloud API
+- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) - Parakeet TDT
+- [Faster Whisper](https://github.com/guillaumekln/faster-whisper) - CPU-optimized Whisper
+- [spaCy](https://spacy.io) - German sentence detection
+- Too much coffee ☕☕☕
+
+## 🎉 Final Thoughts
+
+Is running 3 transcription models simultaneously practical? Probably not.
+
+Is it cool? Absolutely.
+
+Is it overkill? There's no such thing as overkill.
+
+Now go forth and transcribe! 🚀
+
+---
+
+**P.S.** If you enjoyed this, star the repo! If you didn't, star it anyway out of pity. ⭐
+
+**P.P.S.** Yes, I know I could have just used one model. Where's the fun in that?
+
+**P.P.P.S.** The browser's AudioContext automatically resamples your audio to match your hardware's sample rate (usually 44.1kHz or 48kHz), but don't worry - our code resamples it back to 16kHz before sending to the servers. It's audio inception! 🔄

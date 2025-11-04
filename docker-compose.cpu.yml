@@ -1,0 +1,22 @@
+services:
+  voxtral:
+    build:
+      context: .
+      dockerfile: Dockerfile.voxtral
+    container_name: voxtral-server
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: web-server
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      - voxtral

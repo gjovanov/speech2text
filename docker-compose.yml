@@ -1,0 +1,66 @@
+services:
+  voxtral:
+    build:
+      context: .
+      dockerfile: Dockerfile.voxtral
+    container_name: voxtral-server
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+  whisper:
+    build:
+      context: .
+      dockerfile: Dockerfile.whisper
+    container_name: whisper-server
+    ports:
+      - "5001:5001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ipc: host
+    shm_size: '2gb'
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    restart: unless-stopped
+
+  parakeet:
+    build:
+      context: .
+      dockerfile: Dockerfile.parakeet
+    container_name: parakeet-server
+    ports:
+      - "5002:5002"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ipc: host
+    shm_size: '2gb'
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: web-server
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      - voxtral
+      - parakeet
+      - whisper

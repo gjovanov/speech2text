@@ -1,0 +1,13 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Copy HTML files and media
+COPY src/html/ .
+COPY media/ ./media/
+
+# Expose port
+EXPOSE 8000
+
+# Run Python's built-in HTTP server
+CMD ["python3", "-m", "http.server", "8000"]
