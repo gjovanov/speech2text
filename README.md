@@ -2,6 +2,8 @@
 
 **Or: How I Learned to Stop Worrying and Love the Streaming WebSockets**
 
+> ℹ️ **Disclaimer:** This is a weekend project enhanced with AI tools like [Claude Code](https://claude.com/claude-code). The code quality reflects rapid prototyping and experimentation. Use at your own risk, and expect some rough edges! 🛠️
+
 Ever wondered what would happen if you put 3 different speech-to-text AI models in a cage match? No? Well, I did it anyway, and it's pretty awesome!
 
 This project streams German audio through **3 concurrent transcription servers** and displays the results in real-time. It's like watching a rap battle, but with AI models trying to understand German health advice about vegetables. 🥦
@@ -57,6 +59,10 @@ Before you embark on this journey, you'll need:
 
 - **Mistral API key** - For Voxtral (get one at [console.mistral.ai](https://console.mistral.ai))
   - Cost: ~$0.001 per minute of audio (cheaper than your daily coffee)
+- **HuggingFace token** (optional but recommended) - For downloading models
+  - Get one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+  - Required if models are gated or for faster downloads
+  - Set via: `export HF_TOKEN=your_token_here` or in Docker Compose
 
 ## 📦 Installation
 
@@ -127,8 +133,13 @@ sudo apt-get install -y nvidia-container-toolkit
 sudo systemctl restart docker
 ```
 
-Then start all services:
+Then set up your API keys and start all services:
 ```bash
+# Set environment variables
+export MISTRAL_API_KEY="your_mistral_key_here"
+export HF_TOKEN="your_huggingface_token_here"  # Optional but recommended
+
+# Start all services
 docker compose up -d
 ```
 
@@ -137,6 +148,8 @@ This starts:
 - Whisper GPU server (port 5001)
 - Parakeet GPU server (port 5002)
 - Web UI (port 8000)
+
+**Note:** On first run, Whisper and Parakeet will download their models from HuggingFace (~3GB total). This may take 5-10 minutes depending on your connection.
 
 ### Docker Commands
 ```bash

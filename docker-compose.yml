@@ -15,6 +15,8 @@ services:
       context: .
       dockerfile: Dockerfile.whisper
     container_name: whisper-server
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
     ports:
       - "5001:5001"
     deploy:
@@ -36,6 +38,8 @@ services:
       context: .
       dockerfile: Dockerfile.parakeet
     container_name: parakeet-server
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
     ports:
       - "5002:5002"
     deploy:
