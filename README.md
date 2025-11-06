@@ -1,12 +1,10 @@
 # 🎙️ Real-Time German Audio Transcription Showdown
 
-**Or: How I Learned to Stop Worrying and Love the Streaming WebSockets**
-
-> ℹ️ **Disclaimer:** This is a weekend project enhanced with AI tools like [Claude Code](https://claude.com/claude-code). The code quality reflects rapid prototyping and experimentation. Use at your own risk, and expect some rough edges! 🛠️
-
 Ever wondered what would happen if you put 3 different speech-to-text AI models in a cage match? No? Well, I did it anyway, and it's pretty awesome!
 
 This project streams German audio through **3 concurrent transcription servers** and displays the results in real-time. It's like watching a rap battle, but with AI models trying to understand German health advice about vegetables. 🥦
+
+> ℹ️ **Disclaimer:** This is a weekend project enhanced with AI tools like [Claude Code](https://claude.com/claude-code). The code quality reflects rapid prototyping and experimentation. Use at your own risk, and expect some rough edges! 🛠️
 
 ## 🎯 What Does This Thing Do?
 
