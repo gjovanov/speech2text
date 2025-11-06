@@ -29,7 +29,7 @@ Beyond just comparing models, this architecture enables some genuinely useful ap
   ffmpeg -i input.mp4 -f s16le -ar 16000 -ac 1 - | \
     # Pipe to WebSocket for real-time transcription
   ```
-- **WebRTC conference transcription**: Integrate with video conferencing systems (Jitsi, BigBlueButton, etc.) for live meeting transcription and accessibility
+- **WebRTC conference transcription**: Integrate with video conferencing systems (Janus Gateway, Jitsi, BigBlueButton, etc.) for live meeting transcription and accessibility
 - **Podcast/YouTube processing**: Bulk transcribe German audio content for SEO, accessibility, or translation workflows
 - **Accessibility services**: Real-time captioning for German live streams, broadcasts, or events
 - **Language learning tools**: Compare native speaker audio with real-time transcription to improve pronunciation
@@ -348,6 +348,174 @@ async def transcribe_meeting():
         transcript = await ws.recv()
         print(f"Transcript: {transcript}")
 ```
+
+**Janus Gateway Integration:**
+
+Perfect for building scalable WebRTC streaming infrastructure with real-time transcription:
+
+```javascript
+// Client-side: Connect to Janus Gateway and transcribe audio stream
+const janus = new Janus({
+  server: 'https://your-janus-server.com/janus',
+  success: function() {
+    janus.attach({
+      plugin: "janus.plugin.audiobridge",
+      success: function(pluginHandle) {
+        const audioBridge = pluginHandle;
+
+        // Join audio room
+        audioBridge.send({
+          message: {
+            request: "join",
+            room: 1234,
+            display: "Transcription Bot"
+          }
+        });
+      },
+      onremotestream: function(stream) {
+        // Capture remote audio stream
+        const audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(stream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        // Connect to transcription WebSocket
+        const ws = new WebSocket('ws://localhost:5000/transcribe');
+        ws.onopen = () => {
+          ws.send(JSON.stringify({
+            action: 'configure',
+            language: 'de'
+          }));
+        };
+
+        processor.onaudioprocess = (e) => {
+          const inputData = e.inputBuffer.getChannelData(0);
+
+          // Resample to 16kHz and convert to Int16
+          const downsampled = downsampleBuffer(inputData,
+                                               audioContext.sampleRate,
+                                               16000);
+          const pcm16 = convertFloat32ToInt16(downsampled);
+
+          // Send to transcription server
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(pcm16.buffer);
+          }
+        };
+
+        ws.onmessage = (event) => {
+          const transcript = JSON.parse(event.data);
+          console.log('Transcript:', transcript.text);
+
+          // Broadcast transcript back to Janus room as data channel message
+          audioBridge.data({
+            text: JSON.stringify({
+              type: 'transcript',
+              text: transcript.text,
+              timestamp: Date.now()
+            })
+          });
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+      }
+    });
+  }
+});
+
+// Helper functions
+function downsampleBuffer(buffer, sampleRate, outSampleRate) {
+  if (outSampleRate === sampleRate) return buffer;
+  const sampleRateRatio = sampleRate / outSampleRate;
+  const newLength = Math.round(buffer.length / sampleRateRatio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+    let accum = 0, count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+      accum += buffer[i];
+      count++;
+    }
+    result[offsetResult] = accum / count;
+    offsetResult++;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
+}
+
+function convertFloat32ToInt16(buffer) {
+  const l = buffer.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    int16[i] = Math.min(1, buffer[i]) * 0x7FFF;
+  }
+  return int16;
+}
+```
+
+**Server-side Janus Plugin (Python):**
+```python
+# Janus backend integration for automated transcription
+import asyncio
+import websockets
+import json
+from janus_client import JanusClient
+
+async def janus_transcription_bot():
+    # Connect to Janus Gateway
+    janus = JanusClient("https://your-janus-server.com/janus")
+    await janus.connect()
+
+    # Attach to AudioBridge plugin
+    session = await janus.create_session()
+    handle = await session.attach("janus.plugin.audiobridge")
+
+    # Join room
+    await handle.send_message({
+        "request": "join",
+        "room": 1234,
+        "display": "AI Transcription Bot",
+        "muted": True  # Bot only listens, doesn't speak
+    })
+
+    # Connect to transcription service
+    ws = await websockets.connect('ws://localhost:5001/transcribe')
+    await ws.send(json.dumps({"action": "configure", "language": "de"}))
+
+    # Process incoming RTP audio packets
+    async for audio_packet in handle.receive_audio():
+        # Decode RTP payload (Opus -> PCM)
+        pcm_data = decode_opus(audio_packet.payload)
+
+        # Send to transcription
+        await ws.send(pcm_data)
+
+        try:
+            transcript = await asyncio.wait_for(ws.recv(), timeout=0.1)
+            result = json.loads(transcript)
+
+            # Send transcript back to room via data channel
+            await handle.send_data({
+                "type": "transcript",
+                "text": result.get("text", ""),
+                "participant": audio_packet.participant_id,
+                "timestamp": audio_packet.timestamp
+            })
+
+            print(f"Transcribed: {result.get('text', '')}")
+        except asyncio.TimeoutError:
+            pass  # No transcript ready yet
+
+asyncio.run(janus_transcription_bot())
+```
+
+This Janus integration enables:
+- **Multi-party conferencing** with live transcription for all participants
+- **Scalable architecture** - Janus handles media routing, your servers handle AI
+- **Data channel broadcasting** - Transcripts sent back to all room participants
+- **Recording integration** - Combine with Janus recording plugin for post-meeting transcripts
 
 ### Batch Processing Pipeline
 
