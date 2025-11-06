@@ -18,15 +18,37 @@ Imagine you're listening to German audio, and you want to see what's being said.
 
 All three models transcribe the same audio **simultaneously**, and you can watch them race to see who finishes first (spoiler: Voxtral usually wins, but Parakeet puts up a good fight).
 
-## 🚀 Why Would Anyone Want This?
+## 🚀 Real-World Use Cases
 
-Great question! Here are some totally legitimate use cases:
+Beyond just comparing models, this architecture enables some genuinely useful applications:
 
-- **Model comparison**: See which model understands German best
-- **Speed benchmarking**: Watch them race! Place bets!
-- **Academic research**: "I need it for my thesis" (sure you do)
-- **Showing off**: "Look what my computer can do!"
-- **Trust issues**: Can't trust just one AI? Get four opinions!
+### 🎯 Production Use Cases
+
+- **Live video subtitling with FFmpeg**: Stream SRT subtitles from video files or RTSP streams
+  ```bash
+  ffmpeg -i input.mp4 -f s16le -ar 16000 -ac 1 - | \
+    # Pipe to WebSocket for real-time transcription
+  ```
+- **WebRTC conference transcription**: Integrate with video conferencing systems (Jitsi, BigBlueButton, etc.) for live meeting transcription and accessibility
+- **Podcast/YouTube processing**: Bulk transcribe German audio content for SEO, accessibility, or translation workflows
+- **Accessibility services**: Real-time captioning for German live streams, broadcasts, or events
+- **Language learning tools**: Compare native speaker audio with real-time transcription to improve pronunciation
+- **Customer service QA**: Transcribe German customer calls for quality assurance and training
+
+### 🔬 Research & Development
+
+- **Model comparison**: Benchmark accuracy across different German dialects and accents
+- **Speed benchmarking**: Measure real-world latency for production deployment decisions
+- **Academic research**: Study ASR (Automatic Speech Recognition) model behavior and accuracy
+- **A/B testing**: Compare transcription quality before committing to expensive API services
+- **Trust & reliability**: Cross-validate critical transcriptions with multiple models for high-stakes applications
+
+### 🛠️ Developer Use Cases
+
+- **API development**: Use the WebSocket servers as backend for mobile apps, Electron apps, or web services
+- **Integration testing**: Test your application against multiple STT providers simultaneously
+- **Prototype rapid**: Quickly build proof-of-concept transcription features without vendor lock-in
+- **Cost optimization**: Compare cloud (Voxtral) vs. self-hosted (Whisper/Parakeet) costs at scale
 
 ## 🎬 The Demo
 
@@ -227,6 +249,160 @@ nohup python3 parakeet-python-server.py > parakeet.log 2>&1 &
 4. Wait 5-10 seconds
 5. Compare all 3 transcriptions at once
 
+## 🔌 Advanced Integration Examples
+
+### FFmpeg Video Subtitling
+
+Extract audio from a video file and pipe it to the transcription servers:
+
+```bash
+# Real-time transcription from video file
+ffmpeg -i input.mp4 -f s16le -ar 16000 -ac 1 - | \
+  python3 -c "
+import sys
+import asyncio
+import websockets
+
+async def stream():
+    async with websockets.connect('ws://localhost:5000/transcribe') as ws:
+        await ws.send('{\"action\":\"configure\",\"language\":\"de\"}')
+        while True:
+            chunk = sys.stdin.buffer.read(16000 * 2)  # 1 second
+            if not chunk:
+                break
+            await ws.send(chunk)
+            response = await ws.recv()
+            print(response)
+
+asyncio.run(stream())
+"
+```
+
+**Generate SRT subtitles from video:**
+```bash
+# This creates time-stamped subtitles
+ffmpeg -i input.mp4 -f s16le -ar 16000 -ac 1 - | \
+  python3 generate_srt.py > output.srt
+```
+
+**Live stream transcription (RTSP/RTMP):**
+```bash
+# Transcribe live video stream
+ffmpeg -i rtsp://camera.local/stream \
+  -f s16le -ar 16000 -ac 1 - | \
+  python3 stream_transcriber.py
+```
+
+### WebRTC Integration
+
+Integrate with video conferencing platforms for live meeting transcription:
+
+**Jitsi Meet Integration:**
+```javascript
+// Capture audio from Jitsi conference
+const audioStream = jitsiConference.getLocalAudioTrack();
+const mediaRecorder = new MediaRecorder(audioStream, {
+  mimeType: 'audio/webm'
+});
+
+const ws = new WebSocket('ws://localhost:5000/transcribe');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    action: 'configure',
+    language: 'de'
+  }));
+};
+
+mediaRecorder.ondataavailable = (event) => {
+  // Convert to PCM and send to WebSocket
+  convertToPCM(event.data).then(pcm => ws.send(pcm));
+};
+
+ws.onmessage = (event) => {
+  const transcript = JSON.parse(event.data);
+  displaySubtitle(transcript.text);
+};
+```
+
+**BigBlueButton Integration:**
+```python
+# Python script to capture BBB audio and transcribe
+import pyaudio
+import websockets
+import asyncio
+
+async def transcribe_meeting():
+    ws = await websockets.connect('ws://localhost:5002/transcribe')
+    await ws.send('{"action":"configure","language":"de"}')
+
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=pyaudio.paInt16,
+                       channels=1,
+                       rate=16000,
+                       input=True,
+                       frames_per_buffer=1024)
+
+    while True:
+        data = stream.read(1024)
+        await ws.send(data)
+        transcript = await ws.recv()
+        print(f"Transcript: {transcript}")
+```
+
+### Batch Processing Pipeline
+
+Process multiple files in parallel:
+
+```bash
+#!/bin/bash
+# Transcribe all German audio files in a directory
+
+for file in media/*.wav; do
+  echo "Processing: $file"
+  python3 -c "
+import asyncio
+import websockets
+import soundfile as sf
+import json
+
+async def transcribe():
+    data, sr = sf.read('$file')
+    async with websockets.connect('ws://localhost:5000/transcribe') as ws:
+        await ws.send(json.dumps({'action':'transcribe', 'language':'de'}))
+        await ws.send(data.tobytes())
+        result = await ws.recv()
+        print(result)
+
+asyncio.run(transcribe())
+  " > "${file%.wav}.txt"
+done
+```
+
+### API Server Wrapper
+
+Build a REST API on top of the WebSocket servers:
+
+```python
+from fastapi import FastAPI, UploadFile
+import websockets
+import asyncio
+
+app = FastAPI()
+
+@app.post("/api/transcribe")
+async def transcribe_audio(file: UploadFile, model: str = "voxtral"):
+    ports = {"voxtral": 5000, "whisper": 5001, "parakeet": 5002}
+
+    async with websockets.connect(f'ws://localhost:{ports[model]}/transcribe') as ws:
+        await ws.send('{"action":"configure","language":"de"}')
+        audio_data = await file.read()
+        await ws.send(audio_data)
+        result = await ws.recv()
+        return {"model": model, "transcript": result}
+
+# Run with: uvicorn api_wrapper:app --reload
+```
+
 ## 📊 The Results
 
 Here's what you can expect from each model:
@@ -419,3 +595,13 @@ Now go forth and transcribe! 🚀
 **P.P.S.** Yes, I know I could have just used one model. Where's the fun in that?
 
 **P.P.P.S.** The browser's AudioContext automatically resamples your audio to match your hardware's sample rate (usually 44.1kHz or 48kHz), but don't worry - our code resamples it back to 16kHz before sending to the servers. It's audio inception! 🔄
+
+---
+
+## 📦 Open Source
+
+This project is open source and available on GitHub:
+
+🔗 **[https://github.com/gjovanov/speech2text](https://github.com/gjovanov/speech2text)**
+
+Star the repo ⭐, fork it, contribute, or just browse the code. All contributions, issues, and feedback are welcome!
