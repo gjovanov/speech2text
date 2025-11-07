@@ -91,11 +91,11 @@ graph TB
     Whisper -.->|First Run| HuggingFace
     Parakeet -.->|First Run| HuggingFace
 
-    style Browser fill:#e1f5ff
-    style Voxtral fill:#fff4e1
-    style Whisper fill:#e8f5e9
-    style Parakeet fill:#f3e5f5
-    style MistralAPI fill:#ffe0b2
+    style Browser fill:#4a9eff,stroke:#1e3a8a,stroke-width:3px,color:#fff
+    style Voxtral fill:#fbbf24,stroke:#92400e,stroke-width:3px,color:#000
+    style Whisper fill:#34d399,stroke:#065f46,stroke-width:3px,color:#000
+    style Parakeet fill:#a78bfa,stroke:#5b21b6,stroke-width:3px,color:#fff
+    style MistralAPI fill:#fb923c,stroke:#9a3412,stroke-width:3px,color:#000
 ```
 
 ### Data Flow
@@ -177,11 +177,11 @@ graph TB
     WhisperContainer -.->|Model Cache| Cache
     ParakeetContainer -.->|Model Cache| Cache
 
-    style WebContainer fill:#e3f2fd
-    style VoxtralContainer fill:#fff9c4
-    style WhisperContainer fill:#c8e6c9
-    style ParakeetContainer fill:#f8bbd0
-    style GPU fill:#ffccbc
+    style WebContainer fill:#4a9eff,stroke:#1e3a8a,stroke-width:3px,color:#fff
+    style VoxtralContainer fill:#fbbf24,stroke:#92400e,stroke-width:3px,color:#000
+    style WhisperContainer fill:#34d399,stroke:#065f46,stroke-width:3px,color:#000
+    style ParakeetContainer fill:#a78bfa,stroke:#5b21b6,stroke-width:3px,color:#fff
+    style GPU fill:#f87171,stroke:#991b1b,stroke-width:3px,color:#fff
 ```
 
 ## 🎬 The Demo
@@ -248,11 +248,11 @@ flowchart TD
 
     Error1 & Error2 & Error3 --> Retry[Retry Connection<br/>or Check Server Status]
 
-    style Start fill:#e1f5ff
-    style AllReady fill:#c8e6c9
-    style Complete fill:#fff9c4
-    style Compare fill:#f8bbd0
-    style End fill:#e1f5ff
+    style Start fill:#4a9eff,stroke:#1e3a8a,stroke-width:3px,color:#fff
+    style AllReady fill:#34d399,stroke:#065f46,stroke-width:3px,color:#000
+    style Complete fill:#fbbf24,stroke:#92400e,stroke-width:3px,color:#000
+    style Compare fill:#a78bfa,stroke:#5b21b6,stroke-width:3px,color:#fff
+    style End fill:#4a9eff,stroke:#1e3a8a,stroke-width:3px,color:#fff
 ```
 
 ### Comparison Mode Flow
@@ -300,10 +300,10 @@ flowchart TD
     Error --> Troubleshoot[Check Server Logs]
     Troubleshoot --> Restart[Restart Servers]
 
-    style Start fill:#e1f5ff
-    style AllDone fill:#c8e6c9
-    style Decision fill:#fff9c4
-    style End fill:#e1f5ff
+    style Start fill:#4a9eff,stroke:#1e3a8a,stroke-width:3px,color:#fff
+    style AllDone fill:#34d399,stroke:#065f46,stroke-width:3px,color:#000
+    style Decision fill:#fbbf24,stroke:#92400e,stroke-width:3px,color:#000
+    style End fill:#4a9eff,stroke:#1e3a8a,stroke-width:3px,color:#fff
 ```
 
 ### Integration Workflow (FFmpeg/WebRTC)
@@ -358,14 +358,14 @@ flowchart LR
     WS3 --> Live
     WS3 --> DataChannel
 
-    style Video fill:#e3f2fd
-    style FFmpeg fill:#fff9c4
-    style AudioProc fill:#c8e6c9
-    style WS1 fill:#fff4e1
-    style WS2 fill:#e8f5e9
-    style WS3 fill:#f3e5f5
-    style SRT fill:#ffccbc
-    style Live fill:#ffccbc
+    style Video fill:#4a9eff,stroke:#1e3a8a,stroke-width:3px,color:#fff
+    style FFmpeg fill:#fbbf24,stroke:#92400e,stroke-width:3px,color:#000
+    style AudioProc fill:#34d399,stroke:#065f46,stroke-width:3px,color:#000
+    style WS1 fill:#fb923c,stroke:#9a3412,stroke-width:3px,color:#000
+    style WS2 fill:#34d399,stroke:#065f46,stroke-width:3px,color:#000
+    style WS3 fill:#a78bfa,stroke:#5b21b6,stroke-width:3px,color:#fff
+    style SRT fill:#f87171,stroke:#991b1b,stroke-width:3px,color:#fff
+    style Live fill:#f87171,stroke:#991b1b,stroke-width:3px,color:#fff
 ```
 
 ## 🛠️ Prerequisites
