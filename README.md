@@ -48,6 +48,140 @@ Beyond just comparing models, this architecture enables some genuinely useful ap
 - **Prototype rapid**: Quickly build proof-of-concept transcription features without vendor lock-in
 - **Cost optimization**: Compare cloud (Voxtral) vs. self-hosted (Whisper/Parakeet) costs at scale
 
+## 🏗️ Architecture Overview
+
+### System Architecture
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        Browser[Web Browser]
+        Audio[Audio Files/Mic]
+    end
+
+    subgraph "Web Server"
+        WebUI[Static Web Server<br/>Port 8000]
+        HTML1[realtime-transcription.html]
+        HTML2[realtime-transcription-streaming.html]
+    end
+
+    subgraph "Transcription Servers"
+        Voxtral[Voxtral Server<br/>Port 5000<br/>☁️ Cloud API]
+        Whisper[Faster-Whisper Server<br/>Port 5001<br/>🎮 GPU/CPU]
+        Parakeet[Parakeet Server<br/>Port 5002<br/>🎮 GPU]
+    end
+
+    subgraph "External Services"
+        MistralAPI[Mistral AI API<br/>voxtral-mini-latest]
+        HuggingFace[HuggingFace Hub<br/>Model Downloads]
+    end
+
+    Audio --> Browser
+    Browser <-->|HTTP| WebUI
+    WebUI --> HTML1
+    WebUI --> HTML2
+
+    Browser <-->|WebSocket<br/>ws://localhost:5000| Voxtral
+    Browser <-->|WebSocket<br/>ws://localhost:5001| Whisper
+    Browser <-->|WebSocket<br/>ws://localhost:5002| Parakeet
+
+    Voxtral <-->|HTTPS| MistralAPI
+    Whisper -.->|First Run| HuggingFace
+    Parakeet -.->|First Run| HuggingFace
+
+    style Browser fill:#e1f5ff
+    style Voxtral fill:#fff4e1
+    style Whisper fill:#e8f5e9
+    style Parakeet fill:#f3e5f5
+    style MistralAPI fill:#ffe0b2
+```
+
+### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Browser
+    participant Voxtral
+    participant Whisper
+    participant Parakeet
+    participant MistralAPI
+
+    User->>Browser: Load page & select audio
+    Browser->>Voxtral: WebSocket connect
+    Browser->>Whisper: WebSocket connect
+    Browser->>Parakeet: WebSocket connect
+
+    Voxtral-->>Browser: Connected ✓
+    Whisper-->>Browser: Connected ✓
+    Parakeet-->>Browser: Connected ✓
+
+    User->>Browser: Press Play
+
+    loop Every 3.5 seconds
+        Browser->>Browser: Capture audio chunk (16kHz PCM)
+
+        par Parallel Transcription
+            Browser->>Voxtral: Send audio data
+            Voxtral->>MistralAPI: Forward to cloud
+            MistralAPI-->>Voxtral: Transcript
+            Voxtral-->>Browser: Result (1.5s)
+        and
+            Browser->>Whisper: Send audio data
+            Whisper->>Whisper: Local GPU processing
+            Whisper-->>Browser: Result + sentences (4s)
+        and
+            Browser->>Parakeet: Send audio data
+            Parakeet->>Parakeet: Local GPU processing
+            Parakeet-->>Browser: Result (4.5s)
+        end
+
+        Browser->>User: Display 3 transcripts
+    end
+```
+
+### Docker Deployment Architecture
+
+```mermaid
+graph TB
+    subgraph "Docker Host"
+        subgraph "Docker Compose Stack"
+            WebContainer[web-server<br/>Python HTTP Server<br/>:8000]
+            VoxtralContainer[voxtral-server<br/>Python + Mistral SDK<br/>:5000]
+            WhisperContainer[whisper-server<br/>CUDA 12.1 + Faster-Whisper<br/>:5001]
+            ParakeetContainer[parakeet-server<br/>PyTorch 23.10 + NeMo<br/>:5002]
+        end
+
+        subgraph "Volumes & Networks"
+            Network[text2speech_default<br/>Bridge Network]
+            Cache[HuggingFace Cache<br/>~/.cache/huggingface]
+        end
+
+        subgraph "GPU Access"
+            NVIDIA[NVIDIA Container Toolkit<br/>GPU Passthrough]
+            GPU[Physical GPU]
+        end
+    end
+
+    WebContainer -.->|Port 8000| Network
+    VoxtralContainer -.->|Port 5000| Network
+    WhisperContainer -.->|Port 5001| Network
+    ParakeetContainer -.->|Port 5002| Network
+
+    WhisperContainer -->|GPU Access| NVIDIA
+    ParakeetContainer -->|GPU Access| NVIDIA
+    NVIDIA --> GPU
+
+    WhisperContainer -.->|Model Cache| Cache
+    ParakeetContainer -.->|Model Cache| Cache
+
+    style WebContainer fill:#e3f2fd
+    style VoxtralContainer fill:#fff9c4
+    style WhisperContainer fill:#c8e6c9
+    style ParakeetContainer fill:#f8bbd0
+    style GPU fill:#ffccbc
+```
+
 ## 🎬 The Demo
 
 The project includes two web interfaces:
@@ -57,6 +191,180 @@ Watch transcriptions appear word-by-word as the audio plays. It's like watching 
 
 ### 2. **Comparison Mode** (`realtime-transcription.html`)
 Press a button, wait a few seconds, and BAM! All three complete transcriptions side-by-side. Great for comparing accuracy (and finding out which model thinks "Ernährung" sounds like "Entenbraten").
+
+## 👤 User Flow
+
+### Real-Time Streaming Mode Flow
+
+```mermaid
+flowchart TD
+    Start([User Opens App]) --> LoadPage[Load realtime-transcription-streaming.html]
+    LoadPage --> Connect{Connect to<br/>3 Servers}
+
+    Connect -->|WebSocket| Server1[Voxtral :5000]
+    Connect -->|WebSocket| Server2[Whisper :5001]
+    Connect -->|WebSocket| Server3[Parakeet :5002]
+
+    Server1 --> Check1{Connected?}
+    Server2 --> Check2{Connected?}
+    Server3 --> Check3{Connected?}
+
+    Check1 -->|Yes| Status1[✓ Voxtral: Connected]
+    Check1 -->|No| Error1[✗ Voxtral: Disconnected]
+    Check2 -->|Yes| Status2[✓ Whisper: Connected]
+    Check2 -->|No| Error2[✗ Whisper: Disconnected]
+    Check3 -->|Yes| Status3[✓ Parakeet: Connected]
+    Check3 -->|No| Error3[✗ Parakeet: Disconnected]
+
+    Status1 & Status2 & Status3 --> AllReady[All Servers Ready]
+    AllReady --> SelectAudio[User Selects Audio File]
+
+    SelectAudio --> Play[User Presses Play]
+    Play --> Stream{Audio Streaming}
+
+    Stream --> Chunk[3.5s Audio Chunk]
+    Chunk --> Process[Convert to 16kHz PCM]
+    Process --> SendAll[Send to All 3 Servers]
+
+    SendAll --> Wait[Wait for Responses]
+
+    Wait --> R1[Voxtral Response<br/>~1.5s]
+    Wait --> R2[Whisper Response<br/>~4s]
+    Wait --> R3[Parakeet Response<br/>~12s]
+
+    R1 --> Display1[Update Voxtral Column]
+    R2 --> Display2[Update Whisper Column]
+    R3 --> Display3[Update Parakeet Column]
+
+    Display1 & Display2 & Display3 --> Continue{More Audio?}
+
+    Continue -->|Yes| Chunk
+    Continue -->|No| Complete[Transcription Complete]
+
+    Complete --> Compare[User Compares Results]
+    Compare --> End([End])
+
+    Error1 & Error2 & Error3 --> Retry[Retry Connection<br/>or Check Server Status]
+
+    style Start fill:#e1f5ff
+    style AllReady fill:#c8e6c9
+    style Complete fill:#fff9c4
+    style Compare fill:#f8bbd0
+    style End fill:#e1f5ff
+```
+
+### Comparison Mode Flow
+
+```mermaid
+flowchart TD
+    Start([User Opens App]) --> LoadPage[Load realtime-transcription.html]
+    LoadPage --> Connect{Connect to Servers}
+
+    Connect --> Check{All Connected?}
+    Check -->|Yes| Ready[Show Ready State]
+    Check -->|No| Error[Show Disconnected State]
+
+    Ready --> SelectFile[Select Audio from Dropdown]
+    SelectFile --> Button[Click 'Transcribe Now']
+
+    Button --> LoadAudio[Load Full Audio File]
+    LoadAudio --> Prepare[Convert to 16kHz PCM]
+    Prepare --> SendAll[Send Complete Audio<br/>to All 3 Servers]
+
+    SendAll --> Process1[Voxtral Processing]
+    SendAll --> Process2[Whisper Processing]
+    SendAll --> Process3[Parakeet Processing]
+
+    Process1 --> Result1[Result in ~1.5s]
+    Process2 --> Result2[Result in ~4s]
+    Process3 --> Result3[Result in ~12s]
+
+    Result1 --> ShowVoxtral[Display Voxtral Result]
+    Result2 --> ShowWhisper[Display Whisper Result]
+    Result3 --> ShowParakeet[Display Parakeet Result]
+
+    ShowVoxtral & ShowWhisper & ShowParakeet --> AllDone[All Results Visible]
+
+    AllDone --> Analyze{User Analysis}
+    Analyze --> CompareSpeed[Compare Speed]
+    Analyze --> CompareAccuracy[Compare Accuracy]
+    Analyze --> CompareFormat[Compare Formatting]
+
+    CompareSpeed & CompareAccuracy & CompareFormat --> Decision{Try Another?}
+
+    Decision -->|Yes| SelectFile
+    Decision -->|No| End([End])
+
+    Error --> Troubleshoot[Check Server Logs]
+    Troubleshoot --> Restart[Restart Servers]
+
+    style Start fill:#e1f5ff
+    style AllDone fill:#c8e6c9
+    style Decision fill:#fff9c4
+    style End fill:#e1f5ff
+```
+
+### Integration Workflow (FFmpeg/WebRTC)
+
+```mermaid
+flowchart LR
+    subgraph Input Sources
+        Video[Video File]
+        Stream[RTSP Stream]
+        WebRTC[WebRTC Conference]
+        Mic[Microphone]
+    end
+
+    subgraph Processing
+        FFmpeg[FFmpeg<br/>Audio Extraction]
+        AudioProc[Audio Processing<br/>16kHz PCM Conversion]
+    end
+
+    subgraph Transcription Backend
+        WS1[WebSocket<br/>Voxtral :5000]
+        WS2[WebSocket<br/>Whisper :5001]
+        WS3[WebSocket<br/>Parakeet :5002]
+    end
+
+    subgraph Output
+        SRT[SRT Subtitles]
+        Live[Live Captions]
+        API[REST API Response]
+        DataChannel[WebRTC Data Channel]
+    end
+
+    Video --> FFmpeg
+    Stream --> FFmpeg
+    WebRTC --> AudioProc
+    Mic --> AudioProc
+
+    FFmpeg --> AudioProc
+
+    AudioProc --> WS1
+    AudioProc --> WS2
+    AudioProc --> WS3
+
+    WS1 --> SRT
+    WS1 --> Live
+    WS1 --> API
+    WS1 --> DataChannel
+
+    WS2 --> SRT
+    WS2 --> Live
+    WS2 --> API
+
+    WS3 --> Live
+    WS3 --> DataChannel
+
+    style Video fill:#e3f2fd
+    style FFmpeg fill:#fff9c4
+    style AudioProc fill:#c8e6c9
+    style WS1 fill:#fff4e1
+    style WS2 fill:#e8f5e9
+    style WS3 fill:#f3e5f5
+    style SRT fill:#ffccbc
+    style Live fill:#ffccbc
+```
 
 ## 🛠️ Prerequisites
 
