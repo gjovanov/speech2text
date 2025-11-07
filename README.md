@@ -50,6 +50,8 @@ Beyond just comparing models, this architecture enables some genuinely useful ap
 
 ## 🏗️ Architecture Overview
 
+> 💡 **Note:** All diagrams are available as PNG files in the [`assets/`](assets/) folder for use in presentations or external documentation.
+
 ### System Architecture
 
 ```mermaid

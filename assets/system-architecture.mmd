@@ -1,0 +1,41 @@
+graph TB
+    subgraph "Client Layer"
+        Browser[Web Browser]
+        Audio[Audio Files/Mic]
+    end
+
+    subgraph "Web Server"
+        WebUI[Static Web Server<br/>Port 8000]
+        HTML1[realtime-transcription.html]
+        HTML2[realtime-transcription-streaming.html]
+    end
+
+    subgraph "Transcription Servers"
+        Voxtral[Voxtral Server<br/>Port 5000<br/>☁️ Cloud API]
+        Whisper[Faster-Whisper Server<br/>Port 5001<br/>🎮 GPU/CPU]
+        Parakeet[Parakeet Server<br/>Port 5002<br/>🎮 GPU]
+    end
+
+    subgraph "External Services"
+        MistralAPI[Mistral AI API<br/>voxtral-mini-latest]
+        HuggingFace[HuggingFace Hub<br/>Model Downloads]
+    end
+
+    Audio --> Browser
+    Browser <-->|HTTP| WebUI
+    WebUI --> HTML1
+    WebUI --> HTML2
+
+    Browser <-->|WebSocket<br/>ws://localhost:5000| Voxtral
+    Browser <-->|WebSocket<br/>ws://localhost:5001| Whisper
+    Browser <-->|WebSocket<br/>ws://localhost:5002| Parakeet
+
+    Voxtral <-->|HTTPS| MistralAPI
+    Whisper -.->|First Run| HuggingFace
+    Parakeet -.->|First Run| HuggingFace
+
+    style Browser fill:#e1f5ff
+    style Voxtral fill:#fff4e1
+    style Whisper fill:#e8f5e9
+    style Parakeet fill:#f3e5f5
+    style MistralAPI fill:#ffe0b2

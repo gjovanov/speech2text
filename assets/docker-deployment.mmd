@@ -1,0 +1,37 @@
+graph TB
+    subgraph "Docker Host"
+        subgraph "Docker Compose Stack"
+            WebContainer[web-server<br/>Python HTTP Server<br/>:8000]
+            VoxtralContainer[voxtral-server<br/>Python + Mistral SDK<br/>:5000]
+            WhisperContainer[whisper-server<br/>CUDA 12.1 + Faster-Whisper<br/>:5001]
+            ParakeetContainer[parakeet-server<br/>PyTorch 23.10 + NeMo<br/>:5002]
+        end
+
+        subgraph "Volumes & Networks"
+            Network[text2speech_default<br/>Bridge Network]
+            Cache[HuggingFace Cache<br/>~/.cache/huggingface]
+        end
+
+        subgraph "GPU Access"
+            NVIDIA[NVIDIA Container Toolkit<br/>GPU Passthrough]
+            GPU[Physical GPU]
+        end
+    end
+
+    WebContainer -.->|Port 8000| Network
+    VoxtralContainer -.->|Port 5000| Network
+    WhisperContainer -.->|Port 5001| Network
+    ParakeetContainer -.->|Port 5002| Network
+
+    WhisperContainer -->|GPU Access| NVIDIA
+    ParakeetContainer -->|GPU Access| NVIDIA
+    NVIDIA --> GPU
+
+    WhisperContainer -.->|Model Cache| Cache
+    ParakeetContainer -.->|Model Cache| Cache
+
+    style WebContainer fill:#e3f2fd
+    style VoxtralContainer fill:#fff9c4
+    style WhisperContainer fill:#c8e6c9
+    style ParakeetContainer fill:#f8bbd0
+    style GPU fill:#ffccbc

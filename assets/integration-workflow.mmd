@@ -1,0 +1,57 @@
+flowchart LR
+    subgraph Input Sources
+        Video[Video File]
+        Stream[RTSP Stream]
+        WebRTC[WebRTC Conference]
+        Mic[Microphone]
+    end
+
+    subgraph Processing
+        FFmpeg[FFmpeg<br/>Audio Extraction]
+        AudioProc[Audio Processing<br/>16kHz PCM Conversion]
+    end
+
+    subgraph Transcription Backend
+        WS1[WebSocket<br/>Voxtral :5000]
+        WS2[WebSocket<br/>Whisper :5001]
+        WS3[WebSocket<br/>Parakeet :5002]
+    end
+
+    subgraph Output
+        SRT[SRT Subtitles]
+        Live[Live Captions]
+        API[REST API Response]
+        DataChannel[WebRTC Data Channel]
+    end
+
+    Video --> FFmpeg
+    Stream --> FFmpeg
+    WebRTC --> AudioProc
+    Mic --> AudioProc
+
+    FFmpeg --> AudioProc
+
+    AudioProc --> WS1
+    AudioProc --> WS2
+    AudioProc --> WS3
+
+    WS1 --> SRT
+    WS1 --> Live
+    WS1 --> API
+    WS1 --> DataChannel
+
+    WS2 --> SRT
+    WS2 --> Live
+    WS2 --> API
+
+    WS3 --> Live
+    WS3 --> DataChannel
+
+    style Video fill:#e3f2fd
+    style FFmpeg fill:#fff9c4
+    style AudioProc fill:#c8e6c9
+    style WS1 fill:#fff4e1
+    style WS2 fill:#e8f5e9
+    style WS3 fill:#f3e5f5
+    style SRT fill:#ffccbc
+    style Live fill:#ffccbc

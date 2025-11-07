@@ -1,0 +1,39 @@
+sequenceDiagram
+    participant User
+    participant Browser
+    participant Voxtral
+    participant Whisper
+    participant Parakeet
+    participant MistralAPI
+
+    User->>Browser: Load page & select audio
+    Browser->>Voxtral: WebSocket connect
+    Browser->>Whisper: WebSocket connect
+    Browser->>Parakeet: WebSocket connect
+
+    Voxtral-->>Browser: Connected ✓
+    Whisper-->>Browser: Connected ✓
+    Parakeet-->>Browser: Connected ✓
+
+    User->>Browser: Press Play
+
+    loop Every 3.5 seconds
+        Browser->>Browser: Capture audio chunk (16kHz PCM)
+
+        par Parallel Transcription
+            Browser->>Voxtral: Send audio data
+            Voxtral->>MistralAPI: Forward to cloud
+            MistralAPI-->>Voxtral: Transcript
+            Voxtral-->>Browser: Result (1.5s)
+        and
+            Browser->>Whisper: Send audio data
+            Whisper->>Whisper: Local GPU processing
+            Whisper-->>Browser: Result + sentences (4s)
+        and
+            Browser->>Parakeet: Send audio data
+            Parakeet->>Parakeet: Local GPU processing
+            Parakeet-->>Browser: Result (4.5s)
+        end
+
+        Browser->>User: Display 3 transcripts
+    end

@@ -1,0 +1,54 @@
+flowchart TD
+    Start([User Opens App]) --> LoadPage[Load realtime-transcription-streaming.html]
+    LoadPage --> Connect{Connect to<br/>3 Servers}
+
+    Connect -->|WebSocket| Server1[Voxtral :5000]
+    Connect -->|WebSocket| Server2[Whisper :5001]
+    Connect -->|WebSocket| Server3[Parakeet :5002]
+
+    Server1 --> Check1{Connected?}
+    Server2 --> Check2{Connected?}
+    Server3 --> Check3{Connected?}
+
+    Check1 -->|Yes| Status1[✓ Voxtral: Connected]
+    Check1 -->|No| Error1[✗ Voxtral: Disconnected]
+    Check2 -->|Yes| Status2[✓ Whisper: Connected]
+    Check2 -->|No| Error2[✗ Whisper: Disconnected]
+    Check3 -->|Yes| Status3[✓ Parakeet: Connected]
+    Check3 -->|No| Error3[✗ Parakeet: Disconnected]
+
+    Status1 & Status2 & Status3 --> AllReady[All Servers Ready]
+    AllReady --> SelectAudio[User Selects Audio File]
+
+    SelectAudio --> Play[User Presses Play]
+    Play --> Stream{Audio Streaming}
+
+    Stream --> Chunk[3.5s Audio Chunk]
+    Chunk --> Process[Convert to 16kHz PCM]
+    Process --> SendAll[Send to All 3 Servers]
+
+    SendAll --> Wait[Wait for Responses]
+
+    Wait --> R1[Voxtral Response<br/>~1.5s]
+    Wait --> R2[Whisper Response<br/>~4s]
+    Wait --> R3[Parakeet Response<br/>~12s]
+
+    R1 --> Display1[Update Voxtral Column]
+    R2 --> Display2[Update Whisper Column]
+    R3 --> Display3[Update Parakeet Column]
+
+    Display1 & Display2 & Display3 --> Continue{More Audio?}
+
+    Continue -->|Yes| Chunk
+    Continue -->|No| Complete[Transcription Complete]
+
+    Complete --> Compare[User Compares Results]
+    Compare --> End([End])
+
+    Error1 & Error2 & Error3 --> Retry[Retry Connection<br/>or Check Server Status]
+
+    style Start fill:#e1f5ff
+    style AllReady fill:#c8e6c9
+    style Complete fill:#fff9c4
+    style Compare fill:#f8bbd0
+    style End fill:#e1f5ff

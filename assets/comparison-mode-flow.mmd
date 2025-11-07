@@ -1,0 +1,46 @@
+flowchart TD
+    Start([User Opens App]) --> LoadPage[Load realtime-transcription.html]
+    LoadPage --> Connect{Connect to Servers}
+
+    Connect --> Check{All Connected?}
+    Check -->|Yes| Ready[Show Ready State]
+    Check -->|No| Error[Show Disconnected State]
+
+    Ready --> SelectFile[Select Audio from Dropdown]
+    SelectFile --> Button[Click 'Transcribe Now']
+
+    Button --> LoadAudio[Load Full Audio File]
+    LoadAudio --> Prepare[Convert to 16kHz PCM]
+    Prepare --> SendAll[Send Complete Audio<br/>to All 3 Servers]
+
+    SendAll --> Process1[Voxtral Processing]
+    SendAll --> Process2[Whisper Processing]
+    SendAll --> Process3[Parakeet Processing]
+
+    Process1 --> Result1[Result in ~1.5s]
+    Process2 --> Result2[Result in ~4s]
+    Process3 --> Result3[Result in ~12s]
+
+    Result1 --> ShowVoxtral[Display Voxtral Result]
+    Result2 --> ShowWhisper[Display Whisper Result]
+    Result3 --> ShowParakeet[Display Parakeet Result]
+
+    ShowVoxtral & ShowWhisper & ShowParakeet --> AllDone[All Results Visible]
+
+    AllDone --> Analyze{User Analysis}
+    Analyze --> CompareSpeed[Compare Speed]
+    Analyze --> CompareAccuracy[Compare Accuracy]
+    Analyze --> CompareFormat[Compare Formatting]
+
+    CompareSpeed & CompareAccuracy & CompareFormat --> Decision{Try Another?}
+
+    Decision -->|Yes| SelectFile
+    Decision -->|No| End([End])
+
+    Error --> Troubleshoot[Check Server Logs]
+    Troubleshoot --> Restart[Restart Servers]
+
+    style Start fill:#e1f5ff
+    style AllDone fill:#c8e6c9
+    style Decision fill:#fff9c4
+    style End fill:#e1f5ff
