@@ -29,4 +29,20 @@ services:
     container_name: web-server
     expose:
       - "8000"
+    volumes:
+      - media-files:/app/media
     restart: unless-stopped
+
+  upload:
+    build:
+      context: .
+      dockerfile: Dockerfile.upload
+    container_name: upload-server
+    expose:
+      - "9000"
+    volumes:
+      - media-files:/app/media
+    restart: unless-stopped
+
+volumes:
+  media-files:

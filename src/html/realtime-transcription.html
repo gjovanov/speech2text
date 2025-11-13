@@ -157,6 +157,19 @@
                 </select>
             </div>
 
+            <div class="upload-section" style="margin-top: 20px;">
+                <label for="fileUpload" style="display: block; margin-bottom: 10px; font-weight: 600;">📤 Upload Your Audio (WAV/MP3, max 2GB):</label>
+                <input type="file" id="fileUpload" accept=".wav,.mp3" style="margin-bottom: 10px;">
+                <button id="uploadBtn" onclick="uploadFile()" style="margin-left: 10px;">Upload & Convert</button>
+                <div id="uploadStatus" style="margin-top: 10px; font-size: 0.9em;"></div>
+                <div id="uploadProgress" style="margin-top: 10px; display: none;">
+                    <div style="width: 100%; background: #e0e0e0; border-radius: 10px; height: 20px;">
+                        <div id="progressBar" style="width: 0%; background: #667eea; height: 20px; border-radius: 10px; transition: width 0.3s;"></div>
+                    </div>
+                    <span id="progressText" style="font-size: 0.9em; color: #666;">0%</span>
+                </div>
+            </div>
+
             <audio id="audioPlayer" controls>
                 <source src="media/health-german.wav" type="audio/wav">
             </audio>
@@ -475,6 +488,105 @@
         });
 
         document.getElementById('btnTranscribe').addEventListener('click', transcribeNow);
+
+        // File upload function
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileUpload');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                document.getElementById('uploadStatus').innerHTML = '<span style="color: #dc3545;">❌ Please select a file</span>';
+                return;
+            }
+
+            // Validate file size (2GB max)
+            const maxSize = 2 * 1024 * 1024 * 1024; // 2GB
+            if (file.size > maxSize) {
+                document.getElementById('uploadStatus').innerHTML = '<span style="color: #dc3545;">❌ File too large (max 2GB)</span>';
+                return;
+            }
+
+            // Validate file type
+            const allowedTypes = ['audio/wav', 'audio/mpeg', 'audio/mp3', 'audio/x-wav'];
+            const fileExt = file.name.toLowerCase().split('.').pop();
+            if (!['wav', 'mp3'].includes(fileExt)) {
+                document.getElementById('uploadStatus').innerHTML = '<span style="color: #dc3545;">❌ Only WAV and MP3 files allowed</span>';
+                return;
+            }
+
+            const uploadBtn = document.getElementById('uploadBtn');
+            const progressDiv = document.getElementById('uploadProgress');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const statusDiv = document.getElementById('uploadStatus');
+
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Show progress
+            progressDiv.style.display = 'block';
+            uploadBtn.disabled = true;
+            statusDiv.innerHTML = '<span style="color: #667eea;">⏳ Uploading and converting...</span>';
+
+            try {
+                const xhr = new XMLHttpRequest();
+
+                // Track upload progress
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        progressBar.style.width = percentComplete + '%';
+                        progressText.textContent = Math.round(percentComplete) + '%';
+                    }
+                });
+
+                // Handle completion
+                xhr.addEventListener('load', async () => {
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${response.message}</span>`;
+
+                        // Add to dropdown and auto-select
+                        const audioSelect = document.getElementById('audioSelect');
+                        const newOption = new Option(response.filename, response.path, true, true);
+                        audioSelect.add(newOption, 0); // Add at top
+
+                        // Update audio player
+                        const audioPlayer = document.getElementById('audioPlayer');
+                        audioPlayer.src = response.path;
+
+                        // Reset file input
+                        fileInput.value = '';
+
+                        console.log('✓ File uploaded:', response.filename);
+                    } else {
+                        const error = JSON.parse(xhr.responseText);
+                        statusDiv.innerHTML = `<span style="color: #dc3545;">❌ Upload failed: ${error.message || 'Unknown error'}</span>`;
+                    }
+
+                    progressDiv.style.display = 'none';
+                    uploadBtn.disabled = false;
+                });
+
+                // Handle errors
+                xhr.addEventListener('error', () => {
+                    statusDiv.innerHTML = '<span style="color: #dc3545;">❌ Upload failed. Check network connection.</span>';
+                    progressDiv.style.display = 'none';
+                    uploadBtn.disabled = false;
+                });
+
+                // Send request
+                xhr.open('POST', '/api/upload');
+                xhr.send(formData);
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                statusDiv.innerHTML = `<span style="color: #dc3545;">❌ Error: ${error.message}</span>`;
+                progressDiv.style.display = 'none';
+                uploadBtn.disabled = false;
+            }
+        }
 
         // Initialize on load
         window.addEventListener('load', () => {
