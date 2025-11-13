@@ -28,15 +28,18 @@ try:
         "nvidia/parakeet-tdt-0.6b-v3"
     )
 
-    # Move to device
+    # Move to device and optimize
     if device == "cuda":
         model = model.cuda()
     else:
         model = model.cpu()
 
+    # Disable gradients for faster inference
+    torch.set_grad_enabled(False)
     model.eval()
 
-    print(f"✅ Parakeet TDT model loaded successfully on {device}")
+    print(f"✅ Parakeet TDT model loaded successfully on {device}", flush=True)
+    print("🚀 Chunked processing enabled for files > 60 seconds", flush=True)
     device_info = f"{device.upper()}"
 
 except ImportError as e:
@@ -54,6 +57,78 @@ except Exception as e:
 
 # Store audio buffers per client
 audio_buffers = {}
+
+def chunk_audio_with_overlap(audio_array, sample_rate=16000, chunk_seconds=30, overlap_seconds=3):
+    """
+    Split audio into overlapping chunks for efficient processing.
+
+    Args:
+        audio_array: Numpy array of audio samples
+        sample_rate: Sample rate in Hz (default 16000)
+        chunk_seconds: Length of each chunk in seconds (default 30)
+        overlap_seconds: Overlap between chunks in seconds (default 3)
+
+    Returns:
+        List of audio chunks with metadata
+    """
+    chunk_samples = chunk_seconds * sample_rate
+    overlap_samples = overlap_seconds * sample_rate
+    stride = chunk_samples - overlap_samples
+
+    chunks = []
+    for start_idx in range(0, len(audio_array), stride):
+        end_idx = min(start_idx + chunk_samples, len(audio_array))
+        chunk = audio_array[start_idx:end_idx]
+
+        # Store metadata for intelligent merging
+        chunks.append({
+            'audio': chunk,
+            'start_time': start_idx / sample_rate,
+            'end_time': end_idx / sample_rate,
+            'is_first': start_idx == 0,
+            'is_last': end_idx >= len(audio_array)
+        })
+
+        if end_idx >= len(audio_array):
+            break
+
+    return chunks
+
+def merge_transcriptions(chunk_results, overlap_seconds=3):
+    """
+    Intelligently merge transcriptions from overlapping chunks.
+    Removes duplicate text in overlapping regions.
+    """
+    if not chunk_results:
+        return ""
+
+    if len(chunk_results) == 1:
+        return chunk_results[0]['text']
+
+    merged_text = chunk_results[0]['text']
+
+    for i in range(1, len(chunk_results)):
+        current_text = chunk_results[i]['text']
+
+        # Simple word-based merging: take last ~10 words from previous,
+        # first ~10 words from current, find overlap
+        prev_words = merged_text.split()
+        curr_words = current_text.split()
+
+        # Find overlap by checking last N words of previous against first M words of current
+        overlap_found = False
+        for overlap_len in range(min(15, len(prev_words), len(curr_words)), 0, -1):
+            if prev_words[-overlap_len:] == curr_words[:overlap_len]:
+                # Found overlap, merge by taking current from after overlap
+                merged_text = merged_text + " " + " ".join(curr_words[overlap_len:])
+                overlap_found = True
+                break
+
+        if not overlap_found:
+            # No overlap found, just concatenate with space
+            merged_text = merged_text + " " + current_text
+
+    return merged_text.strip()
 
 async def handle_client(websocket):
     client_id = id(websocket)
@@ -117,27 +192,83 @@ async def handle_client(websocket):
 
                         # Convert bytes to numpy array (16-bit PCM to float32)
                         audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                        audio_duration = len(audio_data) / (16000 * 2)
 
                         # Save to temporary WAV file (NeMo expects file paths)
                         import tempfile
                         import soundfile as sf
 
-                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                            tmp_path = tmp.name
-                            sf.write(tmp_path, audio_np, 16000)
+                        # Use chunked processing for long audio files (> 60 seconds)
+                        CHUNK_THRESHOLD = 60  # seconds
 
-                        # Transcribe with Parakeet
-                        transcription = model.transcribe([tmp_path])
+                        if audio_duration > CHUNK_THRESHOLD:
+                            print(f"[Parakeet] Long audio detected ({audio_duration:.1f}s), using chunked processing")
 
-                        # Clean up temp file
-                        os.unlink(tmp_path)
+                            # Split into chunks
+                            chunks = chunk_audio_with_overlap(
+                                audio_np,
+                                sample_rate=16000,
+                                chunk_seconds=30,
+                                overlap_seconds=3
+                            )
+
+                            chunk_results = []
+
+                            # Process each chunk
+                            for i, chunk_data in enumerate(chunks):
+                                chunk_audio = chunk_data['audio']
+                                chunk_duration = len(chunk_audio) / 16000
+
+                                # Save chunk to temp file
+                                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                                    tmp_path = tmp.name
+                                    sf.write(tmp_path, chunk_audio, 16000)
+
+                                # Transcribe chunk
+                                chunk_start = datetime.now()
+                                transcription = model.transcribe([tmp_path])
+                                chunk_time = (datetime.now() - chunk_start).total_seconds()
+
+                                chunk_text = transcription[0].text if transcription and len(transcription) > 0 else ""
+
+                                chunk_results.append({
+                                    'text': chunk_text,
+                                    'start_time': chunk_data['start_time'],
+                                    'end_time': chunk_data['end_time']
+                                })
+
+                                os.unlink(tmp_path)
+
+                                print(f"[Parakeet] Chunk {i+1}/{len(chunks)}: {chunk_duration:.1f}s → {chunk_time:.2f}s ({chunk_duration/chunk_time:.1f}x RT) - {chunk_text[:50]}...")
+
+                                # Send progress update
+                                progress_pct = ((i + 1) / len(chunks)) * 100
+                                await websocket.send(json.dumps({
+                                    "type": "processing",
+                                    "message": f"Processing chunk {i+1}/{len(chunks)} ({progress_pct:.0f}%)",
+                                    "progress": progress_pct
+                                }))
+
+                            # Merge all transcriptions
+                            text = merge_transcriptions(chunk_results, overlap_seconds=3)
+                            print(f"[Parakeet] Merged {len(chunks)} chunks into final transcription")
+
+                        else:
+                            # Original code for short audio (< 60 seconds)
+                            print(f"[Parakeet] Short audio ({audio_duration:.1f}s), using standard processing")
+
+                            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                                tmp_path = tmp.name
+                                sf.write(tmp_path, audio_np, 16000)
+
+                            transcription = model.transcribe([tmp_path])
+                            text = transcription[0].text if transcription and len(transcription) > 0 else ""
+                            os.unlink(tmp_path)
 
                         processing_time = (datetime.now() - start_time).total_seconds()
-                        audio_duration = len(audio_data) / (16000 * 2)
                         rtfx = audio_duration / processing_time if processing_time > 0 else 0
 
-                        # Extract text from Hypothesis object
-                        text = transcription[0].text if transcription and len(transcription) > 0 else ""
+                        print(f"[Parakeet] Total: {audio_duration:.1f}s → {processing_time:.2f}s ({rtfx:.1f}x RT)")
 
                         await websocket.send(json.dumps({
                             "type": "transcription",
@@ -246,13 +377,14 @@ async def handle_client(websocket):
             del audio_buffers[client_id]
 
 async def main():
-    print("\n" + "="*60)
-    print("🚀 Parakeet TDT WebSocket Server")
-    print("="*60)
-    print(f"URL: ws://localhost:5002/transcribe")
-    print(f"Model: nvidia/parakeet-tdt-0.6b-v3 (Multilingual)")
-    print(f"Device: {device_info}")
-    print("="*60 + "\n")
+    print("\n" + "="*60, flush=True)
+    print("🚀 Parakeet TDT WebSocket Server", flush=True)
+    print("="*60, flush=True)
+    print(f"URL: ws://localhost:5002/transcribe", flush=True)
+    print(f"Model: nvidia/parakeet-tdt-0.6b-v3 (Multilingual)", flush=True)
+    print(f"Device: {device_info}", flush=True)
+    print(f"Optimization: Chunked processing for long audio (>60s)", flush=True)
+    print("="*60 + "\n", flush=True)
 
     async with websockets.serve(handle_client, "0.0.0.0", 5002):
         await asyncio.Future()  # Run forever
