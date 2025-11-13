@@ -178,7 +178,6 @@ async def handle_client(websocket):
                             audio_duration = 30.0
 
                         # Quick transcription for streaming with full context
-                        from datetime import datetime
                         start_time = datetime.now()
                         segments, info = model.transcribe(
                             audio_np,
