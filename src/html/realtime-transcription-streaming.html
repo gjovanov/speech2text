@@ -196,15 +196,7 @@
             <div class="audio-selector">
                 <label for="audioSelect">Select Audio:</label>
                 <select id="audioSelect">
-                    <option value="media/health-german.wav">Health & Nutrition</option>
-                    <option value="media/Erdbeben-auf-Haiti.wav">Erdbeben auf Haiti</option>
-                    <option value="media/hobbies-ge.wav">Hobbies</option>
-                    <option value="media/beach-german.wav">Beach</option>
-                    <option value="media/TV-sampleanswers-german.wav">TV Sample Answers</option>
-                    <option value="media/neverendingstory-german.wav">Never Ending Story</option>
-                    <option value="media/eenymeeny-german.wav">Eeny Meeny 1</option>
-                    <option value="media/eenymeeny2-german.wav">Eeny Meeny 2</option>
-                    <option value="media/eenymeeny3-german.wav">Eeny Meeny 3</option>
+                    <option value="">Loading audio files...</option>
                 </select>
             </div>
 
@@ -335,6 +327,41 @@
         let streamInterval;
         let audioBuffer;
         let currentPosition = 0;
+
+        // Load audio files from server on page load
+        async function loadAudioFiles() {
+            try {
+                const response = await fetch('/api/files');
+                const data = await response.json();
+
+                if (data.success && data.files.length > 0) {
+                    const audioSelect = document.getElementById('audioSelect');
+                    audioSelect.innerHTML = ''; // Clear loading message
+
+                    // Add all files to dropdown
+                    data.files.forEach((file, index) => {
+                        const option = new Option(file.filename, file.path);
+                        audioSelect.add(option);
+
+                        // Select first file by default
+                        if (index === 0) {
+                            option.selected = true;
+                            document.getElementById('audioPlayer').src = file.path;
+                        }
+                    });
+
+                    console.log(`✓ Loaded ${data.files.length} audio files`);
+                } else {
+                    document.getElementById('audioSelect').innerHTML = '<option value="">No audio files found</option>';
+                }
+            } catch (error) {
+                console.error('Failed to load audio files:', error);
+                document.getElementById('audioSelect').innerHTML = '<option value="">Error loading files</option>';
+            }
+        }
+
+        // Load files when page loads
+        window.addEventListener('DOMContentLoaded', loadAudioFiles);
 
         // Initialize WebSocket connections
         servers.forEach(server => {
@@ -811,15 +838,20 @@
                         const response = JSON.parse(xhr.responseText);
                         statusDiv.innerHTML = `<span style="color: #28a745;">✅ ${response.message}</span>`;
 
-                        // Add to dropdown and auto-select
-                        const audioSelect = document.getElementById('audioSelect');
-                        const newOption = new Option(response.filename, response.path, true, true);
-                        audioSelect.add(newOption, 0); // Add at top
+                        // Reload file list from server
+                        await loadAudioFiles();
 
-                        // Update audio player
-                        const audioPlayer = document.getElementById('audioPlayer');
-                        audioPlayer.src = response.path;
-                        audioPlayer.load();
+                        // Auto-select the newly uploaded file
+                        const audioSelect = document.getElementById('audioSelect');
+                        for (let i = 0; i < audioSelect.options.length; i++) {
+                            if (audioSelect.options[i].text === response.filename) {
+                                audioSelect.selectedIndex = i;
+                                const audioPlayer = document.getElementById('audioPlayer');
+                                audioPlayer.src = audioSelect.options[i].value;
+                                audioPlayer.load();
+                                break;
+                            }
+                        }
 
                         // Reset file input
                         fileInput.value = '';
