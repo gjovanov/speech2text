@@ -1,4 +1,18 @@
 services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+      - voxtral
+      - whisper
+      - parakeet
+    restart: unless-stopped
+
   voxtral:
     build:
       context: .
@@ -6,8 +20,8 @@ services:
     container_name: voxtral-server
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     restart: unless-stopped
 
   whisper:
@@ -17,8 +31,8 @@ services:
     container_name: whisper-server
     environment:
       - HF_TOKEN=${HF_TOKEN}
-    ports:
-      - "5001:5001"
+    expose:
+      - "5001"
     deploy:
       resources:
         reservations:
@@ -40,8 +54,8 @@ services:
     container_name: parakeet-server
     environment:
       - HF_TOKEN=${HF_TOKEN}
-    ports:
-      - "5002:5002"
+    expose:
+      - "5002"
     deploy:
       resources:
         reservations:
@@ -61,10 +75,6 @@ services:
       context: .
       dockerfile: Dockerfile.web
     container_name: web-server
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     restart: unless-stopped
-    depends_on:
-      - voxtral
-      - parakeet
-      - whisper

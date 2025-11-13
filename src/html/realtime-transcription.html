@@ -224,10 +224,14 @@
     </div>
 
     <script>
+        // Get WebSocket protocol and host dynamically
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+
         const servers = [
-            { name: 'voxtral', url: 'ws://localhost:5000/transcribe', displayName: 'Voxtral' },
-            { name: 'faster', url: 'ws://localhost:5001/transcribe', displayName: 'Faster-Whisper' },
-            { name: 'parakeet', url: 'ws://localhost:5002/transcribe', displayName: 'Parakeet v3' }
+            { name: 'voxtral', url: `${wsProtocol}//${host}/api/voxtral/transcribe`, displayName: 'Voxtral' },
+            { name: 'faster', url: `${wsProtocol}//${host}/api/whisper/transcribe`, displayName: 'Faster-Whisper' },
+            { name: 'parakeet', url: `${wsProtocol}//${host}/api/parakeet/transcribe`, displayName: 'Parakeet v3' }
         ];
 
         const connections = {};

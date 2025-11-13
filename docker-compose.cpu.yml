@@ -1,4 +1,16 @@
 services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx.cpu
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+      - voxtral
+    restart: unless-stopped
+
   voxtral:
     build:
       context: .
@@ -6,8 +18,8 @@ services:
     container_name: voxtral-server
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     restart: unless-stopped
 
   web:
@@ -15,8 +27,6 @@ services:
       context: .
       dockerfile: Dockerfile.web
     container_name: web-server
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     restart: unless-stopped
-    depends_on:
-      - voxtral

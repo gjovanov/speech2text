@@ -437,6 +437,17 @@ Or hardcode it in `voxtral-api-server.py` (but don't commit it to GitHub unless 
 
 ## 🐳 Running with Docker
 
+All services are accessible through **port 80** via Nginx reverse proxy. This is production-ready and works with standard HTTP/HTTPS ports.
+
+### Architecture
+```
+Port 80 (Nginx) → Routes to:
+  /                    → Web UI
+  /api/voxtral/        → Voxtral WebSocket
+  /api/whisper/        → Faster-Whisper WebSocket
+  /api/parakeet/       → Parakeet WebSocket
+```
+
 ### Option 1: CPU-Only (Voxtral + Web UI)
 Perfect for testing or if you don't have an NVIDIA GPU:
 
@@ -445,8 +456,11 @@ docker compose -f docker-compose.cpu.yml up -d
 ```
 
 This starts:
-- Voxtral server (port 5000) - Uses Mistral Cloud API
-- Web UI (port 8000)
+- Nginx reverse proxy (port 80)
+- Voxtral server (internal port 5000) - Uses Mistral Cloud API
+- Web UI (internal port 8000)
+
+**Access the application:** `http://localhost/`
 
 ### Option 2: Full Stack with GPU
 Requires NVIDIA GPU and Docker GPU support:
@@ -474,12 +488,32 @@ docker compose up -d
 ```
 
 This starts:
-- Voxtral server (port 5000)
-- Whisper GPU server (port 5001)
-- Parakeet GPU server (port 5002)
-- Web UI (port 8000)
+- Nginx reverse proxy (port 80)
+- Voxtral server (internal port 5000)
+- Whisper GPU server (internal port 5001)
+- Parakeet GPU server (internal port 5002)
+- Web UI (internal port 8000)
+
+**Access the application:** `http://localhost/`
 
 **Note:** On first run, Whisper and Parakeet will download their models from HuggingFace (~3GB total). This may take 5-10 minutes depending on your connection.
+
+### Production Deployment
+
+For production servers with only ports 80/443 open:
+
+1. **HTTP (port 80):** Already configured! Just run `docker compose up -d`
+
+2. **HTTPS (port 443):** Add SSL/TLS certificates to Nginx:
+   ```bash
+   # Update nginx.conf to listen on 443
+   # Add SSL certificate paths
+   # Redirect HTTP to HTTPS
+   ```
+
+3. **Custom Domain:** Update your DNS A record to point to your server IP
+
+The WebSocket URLs automatically adapt based on the protocol (`ws://` for HTTP, `wss://` for HTTPS) and hostname, making it work seamlessly across different environments.
 
 ### Docker Commands
 ```bash
@@ -539,7 +573,7 @@ nohup python3 parakeet-python-server.py > parakeet.log 2>&1 &
 ## 🎪 Using the App
 
 ### Option 1: Real-Time Streaming
-1. Open `http://localhost:8000/realtime-transcription-streaming.html`
+1. Open `http://localhost/realtime-transcription-streaming.html` (or `http://your-domain/`)
 2. Wait for all 3 servers to connect (you'll see "Connected ✓")
 3. Select an audio file from the dropdown
 4. Press **Play** on the audio player
@@ -551,11 +585,13 @@ nohup python3 parakeet-python-server.py > parakeet.log 2>&1 &
 - ⚡ Faster-Whisper shows complete sentences (thanks, spaCy!)
 
 ### Option 2: Side-by-Side Comparison
-1. Open `http://localhost:8000/realtime-transcription.html`
+1. Open `http://localhost/realtime-transcription.html` (or `http://your-domain/realtime-transcription.html`)
 2. Wait for connections
 3. Click "**Transcribe Now (All Servers)**"
 4. Wait 5-10 seconds
 5. Compare all 3 transcriptions at once
+
+**Note:** WebSocket connections automatically use the correct protocol and hostname, so the app works whether you access it via `localhost`, a custom domain, or HTTPS.
 
 ## 🔌 Advanced Integration Examples
 
