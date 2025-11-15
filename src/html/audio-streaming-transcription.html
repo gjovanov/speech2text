@@ -459,34 +459,22 @@
                 console.log(`[${server.displayName}] Message type: ${data.type}`, data);
 
                 if (data.type === 'partial_transcription' || data.type === 'transcription') {
-                    console.log(`[${server.displayName}] Received transcription: ${data.text}`);
+                    console.log(`[${server.displayName}] Received transcription:`, data);
 
-                    if (data.text && data.text.trim()) {
-                        const newText = data.text.trim();
-
-                        // Smart deduplication: merge with overlap detection
-                        // Use large window (300 words ≈ 30 seconds) to handle sliding window transcriptions
-                        fullTranscripts[server.name] = mergeTranscriptWithOverlap(
-                            fullTranscripts[server.name],
-                            newText,
-                            300  // Check up to 300 words for overlap (handles 30s sliding windows)
-                        );
-
+                    // NEW: Server now provides fullTranscript and lastSentence directly
+                    // This eliminates client-side deduplication complexity
+                    if (data.fullTranscript !== undefined) {
+                        // Server is using new windowing system (30s windows with 2s overlap)
+                        // fullTranscript is already merged and deduplicated on server
+                        fullTranscripts[server.name] = data.fullTranscript;
                         renderFullTranscript(server.name);
+                        console.log(`[${server.displayName}] Full transcript updated (${data.fullTranscript.length} chars)`);
 
-                        // Log deduplication info
-                        const state = chunkStates[server.name];
-                        if (state.lastChunkText) {
-                            console.log(`[${server.displayName}] Chunk ${state.chunkIndex}: Deduplicated successfully`);
-                        }
-                        state.lastChunkText = newText;
-                        state.chunkIndex++;
+                        // Use server-provided lastSentence for chunked view
+                        if (data.lastSentence && data.lastSentence.trim()) {
+                            const lastSentence = data.lastSentence.trim();
 
-                        // Extract only the last sentence for the streaming view
-                        const lastSentence = getLastSentence(newText);
-
-                        if (lastSentence) {
-                            // Check if this is a duplicate of the previous sentence
+                            // Check if this is a duplicate
                             const previousTranscripts = transcripts[server.name];
                             const isDuplicate = previousTranscripts.length > 0 &&
                                 previousTranscripts[previousTranscripts.length - 1].text === lastSentence;
@@ -498,8 +486,40 @@
                                 });
                                 renderTranscripts(server.name);
                                 console.log(`[${server.displayName}] New sentence: ${lastSentence}`);
-                            } else {
-                                console.log(`[${server.displayName}] Skipping duplicate sentence`);
+                            }
+                        }
+
+                        // Log windowing info if available
+                        if (data.windowInfo) {
+                            console.log(`[${server.displayName}] Window: ${data.windowInfo.start.toFixed(1)}s-${data.windowInfo.end.toFixed(1)}s (${data.windowInfo.duration.toFixed(1)}s)`);
+                        }
+                    } else if (data.text && data.text.trim()) {
+                        // FALLBACK: Old behavior for servers not yet updated
+                        const newText = data.text.trim();
+
+                        // Smart deduplication: merge with overlap detection
+                        fullTranscripts[server.name] = mergeTranscriptWithOverlap(
+                            fullTranscripts[server.name],
+                            newText,
+                            300  // Check up to 300 words for overlap
+                        );
+
+                        renderFullTranscript(server.name);
+
+                        // Extract last sentence
+                        const lastSentence = getLastSentence(newText);
+
+                        if (lastSentence) {
+                            const previousTranscripts = transcripts[server.name];
+                            const isDuplicate = previousTranscripts.length > 0 &&
+                                previousTranscripts[previousTranscripts.length - 1].text === lastSentence;
+
+                            if (!isDuplicate) {
+                                transcripts[server.name].push({
+                                    text: lastSentence,
+                                    isPartial: data.isPartial || data.type === 'partial_transcription'
+                                });
+                                renderTranscripts(server.name);
                             }
                         }
                     }
@@ -692,11 +712,11 @@
             });
 
             // Stream chunks synchronized with playback
-            // Optimized: 5-second chunks for good balance between latency and accuracy
-            // With smart deduplication, we get clean transcripts without repetition
-            const CHUNK_DURATION_SECONDS = 5;  // 5 seconds = ~0.5s processing delay
+            // Optimized: 3.5-second chunks for faster updates with 30s windowing on server
+            // Server uses 30-second moving windows with 2-second overlap for best accuracy
+            const CHUNK_DURATION_SECONDS = 3.5;  // 3.5 seconds = faster UI updates
             const chunkSize = 16000 * 2 * CHUNK_DURATION_SECONDS; // 16kHz, 16-bit PCM
-            const intervalMs = CHUNK_DURATION_SECONDS * 1000; // Send every 5 seconds
+            const intervalMs = CHUNK_DURATION_SECONDS * 1000; // Send every 3.5 seconds
 
             streamInterval = setInterval(() => {
                 if (audioPlayer.paused || currentPosition >= pcmData.byteLength) {

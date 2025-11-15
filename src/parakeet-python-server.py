@@ -55,9 +55,11 @@ except Exception as e:
     print("  pip install nemo_toolkit[asr]")
     sys.exit(1)
 
-# Store audio buffers and processed positions per client
+# Store audio buffers and windowing state per client
 audio_buffers = {}
-processed_positions = {}  # Track what audio has been transcribed
+window_positions = {}  # Track window positions for each client
+full_transcripts = {}  # Store accumulated full transcript per client
+last_window_starts = {}  # Track last window start position for each client
 
 def chunk_audio_with_overlap(audio_array, sample_rate=16000, chunk_seconds=30, overlap_seconds=3):
     """
@@ -131,10 +133,73 @@ def merge_transcriptions(chunk_results, overlap_seconds=3):
 
     return merged_text.strip()
 
+def merge_with_overlap(existing_text, new_text, max_overlap_words=50):
+    """
+    Merge new transcription with existing, removing overlapping words.
+    Uses word-level overlap detection to handle 2-second audio overlap.
+    """
+    if not existing_text:
+        return new_text
+    if not new_text:
+        return existing_text
+
+    existing_words = existing_text.strip().split()
+    new_words = new_text.strip().split()
+
+    # Search for overlap from end of existing to start of new
+    # Check up to 50 words for overlap (covers ~2-3 seconds of speech)
+    best_overlap = 0
+    search_limit = min(max_overlap_words, len(existing_words), len(new_words))
+
+    for overlap_len in range(search_limit, 0, -1):
+        existing_suffix = existing_words[-overlap_len:]
+        new_prefix = new_words[:overlap_len]
+
+        # Case-insensitive comparison
+        if [w.lower() for w in existing_suffix] == [w.lower() for w in new_prefix]:
+            best_overlap = overlap_len
+            break
+
+    if best_overlap > 0:
+        # Merge: existing + (new without overlapping prefix)
+        unique_new_words = new_words[best_overlap:]
+        merged = existing_text + " " + " ".join(unique_new_words)
+        print(f"[Merge] Found {best_overlap}-word overlap, appending {len(unique_new_words)} new words")
+        return merged.strip()
+    else:
+        # No overlap found, concatenate
+        print(f"[Merge] No overlap found, concatenating")
+        return (existing_text + " " + new_text).strip()
+
+def extract_last_sentence(text):
+    """Extract the last sentence from text (simple sentence boundary detection)."""
+    if not text.strip():
+        return ""
+
+    # Split by sentence-ending punctuation
+    import re
+    sentences = re.split(r'[.!?]+', text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if sentences:
+        # Add punctuation back to last sentence
+        last_sent = sentences[-1]
+        # Find the punctuation that ended this sentence
+        if text.strip().endswith('.'):
+            last_sent += '.'
+        elif text.strip().endswith('!'):
+            last_sent += '!'
+        elif text.strip().endswith('?'):
+            last_sent += '?'
+        return last_sent
+    return text.strip()
+
 async def handle_client(websocket):
     client_id = id(websocket)
     audio_buffers[client_id] = []
-    processed_positions[client_id] = 0  # Track processed audio position
+    window_positions[client_id] = 0  # Track current window end position
+    full_transcripts[client_id] = ""  # Accumulated full transcript
+    last_window_starts[client_id] = None  # Track last window start position
 
     print(f"Client {client_id} connected")
 
@@ -298,36 +363,54 @@ async def handle_client(websocket):
                         }))
 
                 elif data.get("type") == "transcribe_stream":
-                    # Streaming transcription - process only NEW audio
+                    # Streaming transcription with growing windows
                     if not audio_buffers[client_id]:
                         continue
 
                     # Get all accumulated audio
-                    all_audio_data = b''.join(audio_buffers[client_id])
-                    total_bytes = len(all_audio_data)
+                    audio_data = b''.join(audio_buffers[client_id])
+                    total_bytes = len(audio_data)
+                    total_duration = total_bytes / (16000 * 2)
 
-                    # Get position of last processed audio
-                    last_processed = processed_positions[client_id]
+                    # Only process if we have at least 1 second
+                    if total_duration < 1.0:
+                        continue
 
-                    # Calculate new audio that hasn't been transcribed yet
-                    new_audio_bytes = total_bytes - last_processed
+                    # Windowing parameters
+                    WINDOW_SIZE = 30.0  # Max window size
+                    OVERLAP = 2.0  # Overlap when starting new window
 
-                    # Only process if we have at least 3 seconds of NEW audio
-                    min_new_bytes = 16000 * 2 * 3  # 3 seconds minimum
-                    if new_audio_bytes < min_new_bytes:
+                    # Determine current window start based on which window we're in
+                    current_window_num = int(window_positions[client_id] / (WINDOW_SIZE - OVERLAP))
+                    window_start_time = max(0, current_window_num * (WINDOW_SIZE - OVERLAP) - OVERLAP)
+
+                    # Window grows from start to current total duration (up to 30s max per window)
+                    window_end_time = total_duration
+                    window_duration = window_end_time - window_start_time
+
+                    # If window exceeds 30s, start a new window
+                    if window_duration > WINDOW_SIZE:
+                        # Start new window at (current_window_start + 28s)
+                        window_start_time = window_start_time + (WINDOW_SIZE - OVERLAP)
+                        window_end_time = total_duration
+                        window_duration = window_end_time - window_start_time
+                        print(f"[Parakeet Stream] Starting new window at {window_start_time:.1f}s")
+
+                    # Skip if no new audio since last processing
+                    if window_end_time <= window_positions[client_id]:
                         continue
 
                     try:
-                        # Extract NEW audio with small overlap for context
-                        overlap_bytes = 16000 * 2 * 2  # 2 seconds overlap for context
-                        start_pos = max(0, last_processed - overlap_bytes)
-                        new_audio_data = all_audio_data[start_pos:]
+                        # Extract window from buffer
+                        start_sample = int(window_start_time * 16000)
+                        end_sample = int(window_end_time * 16000)
 
-                        # Convert to numpy
-                        audio_np = np.frombuffer(new_audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-                        audio_duration = len(new_audio_data) / (16000 * 2)
+                        # Convert to numpy and extract window
+                        audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                        window_audio = audio_np[start_sample:end_sample]
+                        window_duration = len(window_audio) / 16000
 
-                        print(f"[Parakeet Stream] Processing {audio_duration:.1f}s (new: {new_audio_bytes/(16000*2):.1f}s, overlap: 2s)")
+                        print(f"[Parakeet Stream] Processing growing window {window_start_time:.1f}s-{window_end_time:.1f}s ({window_duration:.1f}s, total: {total_duration:.1f}s)")
 
                         # Save to temp file
                         import tempfile
@@ -335,37 +418,72 @@ async def handle_client(websocket):
 
                         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
                             tmp_path = tmp.name
-                            sf.write(tmp_path, audio_np, 16000)
+                            sf.write(tmp_path, window_audio, 16000)
 
-                        # Transcribe this chunk
+                        # Transcribe window
                         start_time = datetime.now()
                         transcription = model.transcribe([tmp_path])
-                        text = transcription[0].text if transcription and len(transcription) > 0 else ""
+                        window_text = transcription[0].text if transcription and len(transcription) > 0 else ""
                         processing_time = (datetime.now() - start_time).total_seconds()
 
                         os.unlink(tmp_path)
 
-                        print(f"[Parakeet Stream] Processed in {processing_time:.2f}s: {text[:80]}...")
+                        print(f"[Parakeet Stream] Window transcribed in {processing_time:.2f}s: {window_text[:80]}...")
 
-                        # Update processed position to current total
-                        processed_positions[client_id] = total_bytes
+                        # Growing window (same start) vs new window (different start)
+                        if window_start_time == last_window_starts[client_id]:
+                            # Growing window - REPLACE transcript (re-transcribing same audio)
+                            full_transcripts[client_id] = window_text
+                            print(f"[Parakeet Stream] Growing window - replacing transcript")
+                        else:
+                            # New window - MERGE with overlap detection
+                            if full_transcripts[client_id]:
+                                full_transcripts[client_id] = merge_with_overlap(
+                                    full_transcripts[client_id],
+                                    window_text,
+                                    max_overlap_words=100  # Larger window for 2s overlap
+                                )
+                                print(f"[Parakeet Stream] New window - merging with overlap detection")
+                            else:
+                                # First window ever
+                                full_transcripts[client_id] = window_text
+                                print(f"[Parakeet Stream] First window - initializing transcript")
+                            # Update last window start
+                            last_window_starts[client_id] = window_start_time
 
-                        # Only send if we got text
-                        if text.strip():
+                        # Extract last sentence for chunked display
+                        last_sentence = extract_last_sentence(full_transcripts[client_id])
+
+                        print(f"[Parakeet Stream] Full transcript length: {len(full_transcripts[client_id])} chars")
+                        print(f"[Parakeet Stream] Last sentence: {last_sentence[:60]}...")
+
+                        # Update window position to end of processed audio
+                        window_positions[client_id] = total_duration
+
+                        # Send response with both full transcript and last sentence
+                        if window_text.strip():
                             await websocket.send(json.dumps({
                                 "type": "partial_transcription",
-                                "text": text,
-                                "isPartial": True
+                                "text": window_text,  # Current window text (for compatibility)
+                                "fullTranscript": full_transcripts[client_id],  # Merged full transcript
+                                "lastSentence": last_sentence,  # Last sentence only
+                                "isPartial": True,
+                                "windowInfo": {
+                                    "start": window_start_time,
+                                    "end": window_end_time,
+                                    "duration": window_duration
+                                }
                             }))
 
                         # Clean old audio buffer to save memory
-                        # Keep last 60s for potential re-transcription
-                        max_buffer_bytes = 60 * 16000 * 2
+                        # Keep last 90 seconds for potential re-windowing
+                        max_buffer_bytes = 90 * 16000 * 2
                         if total_bytes > max_buffer_bytes:
-                            keep_from = total_bytes - max_buffer_bytes
-                            audio_buffers[client_id] = [all_audio_data[keep_from:]]
-                            processed_positions[client_id] = max_buffer_bytes
-                            print(f"[Parakeet Stream] Trimmed old audio, keeping last 60s")
+                            keep_from_byte = total_bytes - max_buffer_bytes
+                            audio_buffers[client_id] = [audio_data[keep_from_byte:]]
+                            # Adjust window position
+                            window_positions[client_id] = min(window_positions[client_id], 90.0)
+                            print(f"[Parakeet Stream] Trimmed buffer to last 90s")
 
                     except Exception as e:
                         print(f"Stream transcription error: {e}")
@@ -374,7 +492,9 @@ async def handle_client(websocket):
 
                 elif data.get("type") == "clear":
                     audio_buffers[client_id] = []
-                    processed_positions[client_id] = 0
+                    window_positions[client_id] = 0
+                    full_transcripts[client_id] = ""
+                    last_window_starts[client_id] = None
                     await websocket.send(json.dumps({
                         "type": "cleared",
                         "message": "Audio buffer cleared"
@@ -385,8 +505,12 @@ async def handle_client(websocket):
     finally:
         if client_id in audio_buffers:
             del audio_buffers[client_id]
-        if client_id in processed_positions:
-            del processed_positions[client_id]
+        if client_id in window_positions:
+            del window_positions[client_id]
+        if client_id in full_transcripts:
+            del full_transcripts[client_id]
+        if client_id in last_window_starts:
+            del last_window_starts[client_id]
 
 async def main():
     print("\n" + "="*60, flush=True)
