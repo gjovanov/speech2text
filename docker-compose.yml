@@ -10,6 +10,7 @@ services:
       - web
       - voxtral
       - whisper
+      # - whisper-turbo
       - parakeet
     restart: unless-stopped
 
@@ -31,6 +32,7 @@ services:
     container_name: whisper-server
     environment:
       - HF_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=0
     expose:
       - "5001"
     deploy:
@@ -40,6 +42,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+        limits:
+          memory: 2G
     ipc: host
     shm_size: '2gb'
     ulimits:
@@ -54,6 +58,7 @@ services:
     container_name: parakeet-server
     environment:
       - HF_TOKEN=${HF_TOKEN}
+      - NVIDIA_VISIBLE_DEVICES=0
     expose:
       - "5002"
     deploy:
@@ -63,12 +68,36 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+        limits:
+          memory: 2G
     ipc: host
     shm_size: '2gb'
     ulimits:
       memlock: -1
       stack: 67108864
     restart: unless-stopped
+
+  # whisper-turbo:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.whisper-turbo
+  #   container_name: whisper-turbo-server
+  #   environment:
+  #     - HF_TOKEN=${HF_TOKEN}
+  #     - CUDA_VISIBLE_DEVICES=""
+  #   expose:
+  #     - "5003"
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '4'
+  #         memory: 4G
+  #   ipc: host
+  #   shm_size: '2gb'
+  #   ulimits:
+  #     memlock: -1
+  #     stack: 67108864
+  #   restart: unless-stopped
 
   web:
     build:

@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Real-time Transcription - Server Comparison</title>
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="favicon-48x48.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="manifest" href="site.webmanifest">
+    <meta name="theme-color" content="#667eea">
+
     <style>
         body {
             font-family: 'Segoe UI', sans-serif;
@@ -72,6 +83,7 @@
         .server-name.whisper { color: #007bff; }
         .server-name.faster { color: #6f42c1; }
         .server-name.voxtral { color: #fd7e14; }
+        .server-name.turbo { color: #dc3545; }
         .model-info { font-size: 0.9em; color: #666; }
         .transcription-text {
             font-size: 1.15em;
@@ -169,7 +181,6 @@
             <div class="connection-status">
                 <span class="status-badge disconnected" id="status-voxtral">Voxtral: Disconnected</span>
                 <span class="status-badge disconnected" id="status-parakeet">Parakeet: Disconnected</span>
-                <span class="status-badge disconnected" id="status-whisper">Whisper: Disconnected</span>
                 <span class="status-badge disconnected" id="status-faster">Faster-Whisper: Disconnected</span>
             </div>
 
@@ -204,27 +215,28 @@
                 <div class="performance-stats" id="stats-parakeet"></div>
             </div>
 
-            <div class="transcription-row" id="row-whisper">
-                <div class="transcription-header">
-                    <span class="server-name whisper">🔵 Whisper Small</span>
-                    <span class="model-info">Xenova/whisper-small • Port 5002 • Transformers.js</span>
-                </div>
-                <div class="transcription-text empty" id="text-whisper">
-                    Waiting for audio...
-                </div>
-                <div class="performance-stats" id="stats-whisper"></div>
-            </div>
-
             <div class="transcription-row" id="row-faster">
                 <div class="transcription-header">
                     <span class="server-name faster">⚡ Faster-Whisper</span>
-                    <span class="model-info">Whisper Small • Port 5003 • faster-whisper (Best for German!) ⭐</span>
+                    <span class="model-info">Whisper Small • Port 5001 • faster-whisper (Best for German!) ⭐</span>
                 </div>
                 <div class="transcription-text empty" id="text-faster">
                     Waiting for audio...
                 </div>
                 <div class="performance-stats" id="stats-faster"></div>
             </div>
+
+            <!-- Whisper Turbo commented out - GPU memory optimization -->
+            <!-- <div class="transcription-row" id="row-turbo">
+                <div class="transcription-header">
+                    <span class="server-name turbo">🚄 Whisper Large v3 Turbo</span>
+                    <span class="model-info">openai/whisper-large-v3-turbo • Port 5003 • State-of-the-art accuracy ⭐⭐⭐</span>
+                </div>
+                <div class="transcription-text empty" id="text-turbo">
+                    Waiting for audio...
+                </div>
+                <div class="performance-stats" id="stats-turbo"></div>
+            </div> -->
         </div>
     </div>
 
@@ -237,6 +249,7 @@
             { name: 'voxtral', url: `${wsProtocol}//${host}/api/voxtral/transcribe`, displayName: 'Voxtral' },
             { name: 'faster', url: `${wsProtocol}//${host}/api/whisper/transcribe`, displayName: 'Faster-Whisper' },
             { name: 'parakeet', url: `${wsProtocol}//${host}/api/parakeet/transcribe`, displayName: 'Parakeet v3' }
+            // { name: 'turbo', url: `${wsProtocol}//${host}/api/whisper-turbo/transcribe`, displayName: 'Whisper Turbo' }
         ];
 
         const connections = {};
@@ -294,16 +307,6 @@
                     const textEl = document.getElementById(`text-${server.name}`);
                     textEl.className = 'transcription-text empty';
                     textEl.textContent = 'Connected! Click "Transcribe Now" to start.';
-
-                    // Configure Whisper for German
-                    if (server.name === 'whisper') {
-                        ws.send(JSON.stringify({
-                            type: 'configure',
-                            language: 'german',
-                            task: 'transcribe',
-                            returnTimestamps: true
-                        }));
-                    }
                 };
 
                 ws.onmessage = (event) => {

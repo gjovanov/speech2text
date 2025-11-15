@@ -55,8 +55,9 @@ except Exception as e:
     print("  pip install nemo_toolkit[asr]")
     sys.exit(1)
 
-# Store audio buffers per client
+# Store audio buffers and processed positions per client
 audio_buffers = {}
+processed_positions = {}  # Track what audio has been transcribed
 
 def chunk_audio_with_overlap(audio_array, sample_rate=16000, chunk_seconds=30, overlap_seconds=3):
     """
@@ -133,6 +134,7 @@ def merge_transcriptions(chunk_results, overlap_seconds=3):
 async def handle_client(websocket):
     client_id = id(websocket)
     audio_buffers[client_id] = []
+    processed_positions[client_id] = 0  # Track processed audio position
 
     print(f"Client {client_id} connected")
 
@@ -296,30 +298,36 @@ async def handle_client(websocket):
                         }))
 
                 elif data.get("type") == "transcribe_stream":
-                    # Streaming transcription
+                    # Streaming transcription - process only NEW audio
                     if not audio_buffers[client_id]:
                         continue
 
-                    audio_data = b''.join(audio_buffers[client_id])
+                    # Get all accumulated audio
+                    all_audio_data = b''.join(audio_buffers[client_id])
+                    total_bytes = len(all_audio_data)
 
-                    # Only process if we have at least 1 second
-                    if len(audio_data) < 16000 * 2:
+                    # Get position of last processed audio
+                    last_processed = processed_positions[client_id]
+
+                    # Calculate new audio that hasn't been transcribed yet
+                    new_audio_bytes = total_bytes - last_processed
+
+                    # Only process if we have at least 3 seconds of NEW audio
+                    min_new_bytes = 16000 * 2 * 3  # 3 seconds minimum
+                    if new_audio_bytes < min_new_bytes:
                         continue
 
                     try:
+                        # Extract NEW audio with small overlap for context
+                        overlap_bytes = 16000 * 2 * 2  # 2 seconds overlap for context
+                        start_pos = max(0, last_processed - overlap_bytes)
+                        new_audio_data = all_audio_data[start_pos:]
+
                         # Convert to numpy
-                        audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-                        audio_duration = len(audio_data) / (16000 * 2)
+                        audio_np = np.frombuffer(new_audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                        audio_duration = len(new_audio_data) / (16000 * 2)
 
-                        print(f"[Parakeet Stream] Transcribing {audio_duration:.1f}s of accumulated audio")
-
-                        # Limit buffer to last 30 seconds to prevent hang
-                        # Keep more context than other models for better accuracy
-                        max_samples = 30 * 16000  # 30 seconds
-                        if len(audio_np) > max_samples:
-                            print(f"[Parakeet Stream] Buffer too large ({audio_duration:.1f}s), keeping last 30s")
-                            audio_np = audio_np[-max_samples:]
-                            audio_duration = 30.0
+                        print(f"[Parakeet Stream] Processing {audio_duration:.1f}s (new: {new_audio_bytes/(16000*2):.1f}s, overlap: 2s)")
 
                         # Save to temp file
                         import tempfile
@@ -329,7 +337,7 @@ async def handle_client(websocket):
                             tmp_path = tmp.name
                             sf.write(tmp_path, audio_np, 16000)
 
-                        # Quick transcription with full context
+                        # Transcribe this chunk
                         start_time = datetime.now()
                         transcription = model.transcribe([tmp_path])
                         text = transcription[0].text if transcription and len(transcription) > 0 else ""
@@ -337,7 +345,10 @@ async def handle_client(websocket):
 
                         os.unlink(tmp_path)
 
-                        print(f"[Parakeet Stream] Processed in {processing_time:.2f}s")
+                        print(f"[Parakeet Stream] Processed in {processing_time:.2f}s: {text[:80]}...")
+
+                        # Update processed position to current total
+                        processed_positions[client_id] = total_bytes
 
                         # Only send if we got text
                         if text.strip():
@@ -346,17 +357,15 @@ async def handle_client(websocket):
                                 "text": text,
                                 "isPartial": True
                             }))
-                            print(f"[Parakeet Stream] Sent: {text}")
 
-                        # Keep buffer but limit size to prevent unbounded growth
-                        # Trim to last 30 seconds worth of audio
-                        max_buffer_bytes = 30 * 16000 * 2  # 30 seconds of 16-bit PCM
-                        current_buffer_size = sum(len(b) for b in audio_buffers[client_id])
-                        if current_buffer_size > max_buffer_bytes:
-                            # Recombine and trim
-                            all_audio = b''.join(audio_buffers[client_id])
-                            audio_buffers[client_id] = [all_audio[-max_buffer_bytes:]]
-                            print(f"[Parakeet Stream] Trimmed buffer to last 30s")
+                        # Clean old audio buffer to save memory
+                        # Keep last 60s for potential re-transcription
+                        max_buffer_bytes = 60 * 16000 * 2
+                        if total_bytes > max_buffer_bytes:
+                            keep_from = total_bytes - max_buffer_bytes
+                            audio_buffers[client_id] = [all_audio_data[keep_from:]]
+                            processed_positions[client_id] = max_buffer_bytes
+                            print(f"[Parakeet Stream] Trimmed old audio, keeping last 60s")
 
                     except Exception as e:
                         print(f"Stream transcription error: {e}")
@@ -365,6 +374,7 @@ async def handle_client(websocket):
 
                 elif data.get("type") == "clear":
                     audio_buffers[client_id] = []
+                    processed_positions[client_id] = 0
                     await websocket.send(json.dumps({
                         "type": "cleared",
                         "message": "Audio buffer cleared"
@@ -375,6 +385,8 @@ async def handle_client(websocket):
     finally:
         if client_id in audio_buffers:
             del audio_buffers[client_id]
+        if client_id in processed_positions:
+            del processed_positions[client_id]
 
 async def main():
     print("\n" + "="*60, flush=True)

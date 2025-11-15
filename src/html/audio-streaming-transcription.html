@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Real-time Streaming Transcription - All Servers</title>
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="favicon-48x48.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="manifest" href="site.webmanifest">
+    <meta name="theme-color" content="#667eea">
+
     <style>
         body {
             font-family: 'Segoe UI', sans-serif;
@@ -77,6 +88,7 @@
         .full-transcript-box.parakeet { border-left-color: #ff6b6b; }
         .full-transcript-box.whisper { border-left-color: #4ecdc4; }
         .full-transcript-box.faster { border-left-color: #95e1d3; }
+        .full-transcript-box.turbo { border-left-color: #dc3545; }
 
         .full-transcript-box h3 {
             margin: 0 0 15px 0;
@@ -88,6 +100,7 @@
         .full-transcript-box h3.parakeet { color: #ff6b6b; }
         .full-transcript-box h3.whisper { color: #4ecdc4; }
         .full-transcript-box h3.faster { color: #95e1d3; }
+        .full-transcript-box h3.turbo { color: #dc3545; }
 
         .full-transcript-text {
             font-size: 1em;
@@ -117,6 +130,7 @@
         .transcription-box.parakeet { border-left-color: #ff6b6b; }
         .transcription-box.whisper { border-left-color: #4ecdc4; }
         .transcription-box.faster { border-left-color: #95e1d3; }
+        .transcription-box.turbo { border-left-color: #dc3545; }
 
         .server-name {
             font-size: 1.2em;
@@ -127,6 +141,7 @@
         .server-name.parakeet { color: #ff6b6b; }
         .server-name.whisper { color: #4ecdc4; }
         .server-name.faster { color: #95e1d3; }
+        .server-name.turbo { color: #dc3545; }
 
         .transcription-text {
             font-size: 1.1em;
@@ -220,14 +235,13 @@
             <div class="status-badges">
                 <span class="status-badge disconnected" id="status-voxtral">Voxtral: Disconnected</span>
                 <span class="status-badge disconnected" id="status-parakeet">Parakeet v3: Disconnected</span>
-                <span class="status-badge disconnected" id="status-whisper">Whisper: Disconnected</span>
                 <span class="status-badge disconnected" id="status-faster">Faster-Whisper: Disconnected</span>
             </div>
 
             <div class="info">
-                <strong>📡 Real-time Streaming Mode - All 4 Servers</strong><br>
-                Comparing Voxtral (Mistral Cloud), Parakeet TDT v3 (8.5x), Whisper Small, and Faster-Whisper (3x) with spaCy.<br>
-                Transcriptions appear every ~3.5 seconds with accumulated context for better accuracy.
+                <strong>📡 Real-time Streaming Mode - 3 Servers</strong><br>
+                Comparing Voxtral (Mistral Cloud), Parakeet TDT v3 (optimized), and Faster-Whisper.<br>
+                Transcriptions appear every ~5 seconds with smart deduplication for clean output.
             </div>
         </div>
 
@@ -247,52 +261,58 @@
                         <em style="color: #999;">Waiting for audio...</em>
                     </div>
                 </div>
-                <div class="full-transcript-box whisper">
-                    <h3 class="whisper">🎯 Whisper Small</h3>
-                    <div class="full-transcript-text" id="full-text-whisper">
-                        <em style="color: #999;">Waiting for audio...</em>
-                    </div>
-                </div>
                 <div class="full-transcript-box faster">
                     <h3 class="faster">⚡ Faster-Whisper + spaCy</h3>
                     <div class="full-transcript-text" id="full-text-faster">
                         <em style="color: #999;">Waiting for audio...</em>
                     </div>
                 </div>
+                <!-- Whisper Turbo commented out - GPU memory optimization -->
+                <!-- <div class="full-transcript-box turbo">
+                    <h3 class="turbo">🚄 Whisper Large v3 Turbo</h3>
+                    <div class="full-transcript-text" id="full-text-turbo">
+                        <em style="color: #999;">Waiting for audio...</em>
+                    </div>
+                </div> -->
             </div>
         </div>
 
-        <div class="transcription-grid">
-            <div class="transcription-box voxtral" id="voxtral-box">
-                <div class="server-name voxtral">🔶 Voxtral (Mistral Cloud API)</div>
-                <div class="transcription-text" id="text-voxtral">
-                    <em>Press play to start streaming...</em>
+        <!-- Chunked Transcript Panel -->
+        <div class="full-transcript-panel">
+            <h2>🔄 Chunked Transcript (Newest First)</h2>
+            <div class="transcription-grid">
+                <div class="transcription-box voxtral" id="voxtral-box">
+                    <div class="server-name voxtral">🔶 Voxtral (Mistral Cloud API)</div>
+                    <div class="transcription-text" id="text-voxtral">
+                        <em>Press play to start streaming...</em>
+                    </div>
+                    <div class="stats" id="stats-voxtral"></div>
                 </div>
-                <div class="stats" id="stats-voxtral"></div>
-            </div>
 
-            <div class="transcription-box parakeet" id="parakeet-box">
-                <div class="server-name parakeet">🚀 Parakeet TDT v3 (8.5x Speed)</div>
-                <div class="transcription-text" id="text-parakeet">
-                    <em>Press play to start streaming...</em>
+                <div class="transcription-box parakeet" id="parakeet-box">
+                    <div class="server-name parakeet">🚀 Parakeet TDT v3 (8.5x Speed)</div>
+                    <div class="transcription-text" id="text-parakeet">
+                        <em>Press play to start streaming...</em>
+                    </div>
+                    <div class="stats" id="stats-parakeet"></div>
                 </div>
-                <div class="stats" id="stats-parakeet"></div>
-            </div>
 
-            <div class="transcription-box whisper" id="whisper-box">
-                <div class="server-name whisper">🎯 Whisper Small</div>
-                <div class="transcription-text" id="text-whisper">
-                    <em>Press play to start streaming...</em>
+                <div class="transcription-box faster" id="faster-box">
+                    <div class="server-name faster">⚡ Faster-Whisper + spaCy (3x Speed)</div>
+                    <div class="transcription-text" id="text-faster">
+                        <em>Press play to start streaming...</em>
+                    </div>
+                    <div class="stats" id="stats-faster"></div>
                 </div>
-                <div class="stats" id="stats-whisper"></div>
-            </div>
 
-            <div class="transcription-box faster" id="faster-box">
-                <div class="server-name faster">⚡ Faster-Whisper + spaCy (3x Speed)</div>
-                <div class="transcription-text" id="text-faster">
-                    <em>Press play to start streaming...</em>
-                </div>
-                <div class="stats" id="stats-faster"></div>
+                <!-- Whisper Turbo commented out - GPU memory optimization -->
+                <!-- <div class="transcription-box turbo" id="turbo-box">
+                    <div class="server-name turbo">🚄 Whisper Large v3 Turbo (SOTA Accuracy)</div>
+                    <div class="transcription-text" id="text-turbo">
+                        <em>Press play to start streaming...</em>
+                    </div>
+                    <div class="stats" id="stats-turbo"></div>
+                </div> -->
             </div>
         </div>
     </div>
@@ -306,6 +326,7 @@
             { name: 'voxtral', url: `${wsProtocol}//${host}/api/voxtral/transcribe`, displayName: 'Voxtral' },
             { name: 'faster', url: `${wsProtocol}//${host}/api/whisper/transcribe`, displayName: 'Faster-Whisper' },
             { name: 'parakeet', url: `${wsProtocol}//${host}/api/parakeet/transcribe`, displayName: 'Parakeet v3' }
+            // { name: 'turbo', url: `${wsProtocol}//${host}/api/whisper-turbo/transcribe`, displayName: 'Whisper Turbo' }
         ];
 
         const audioPlayer = document.getElementById('audioPlayer');
@@ -313,14 +334,14 @@
         const transcripts = {
             voxtral: [],
             parakeet: [],
-            whisper: [],
             faster: []
+            // turbo: []
         };
         const fullTranscripts = {
             voxtral: '',
             parakeet: '',
-            whisper: '',
             faster: ''
+            // turbo: ''
         };
 
         let audioContext;
@@ -363,6 +384,57 @@
         // Load files when page loads
         window.addEventListener('DOMContentLoaded', loadAudioFiles);
 
+        // Smart deduplication for chunk boundaries
+        // This handles the case where servers send full 30-second sliding windows
+        function mergeTranscriptWithOverlap(existingText, newText, maxOverlapWords = 200) {
+            if (!existingText) return newText;
+            if (!newText) return existingText;
+
+            const existingWords = existingText.trim().split(/\s+/);
+            const newWords = newText.trim().split(/\s+/);
+
+            // Strategy: Find the longest overlap between end of existing and start of new
+            // We need to check a large window because servers send 30s sliding windows
+            let bestOverlap = 0;
+            const searchLimit = Math.min(maxOverlapWords, existingWords.length, newWords.length);
+
+            // Start from the largest possible overlap and work down
+            for (let overlapLen = searchLimit; overlapLen > 5; overlapLen--) {
+                const existingSuffix = existingWords.slice(-overlapLen).join(' ').toLowerCase();
+                const newPrefix = newWords.slice(0, overlapLen).join(' ').toLowerCase();
+
+                // Check for exact match
+                if (existingSuffix === newPrefix) {
+                    bestOverlap = overlapLen;
+                    console.log(`✂️ Deduplication: Found ${bestOverlap}-word overlap`);
+                    break;
+                }
+            }
+
+            // Merge: existing + (new without overlapping prefix)
+            if (bestOverlap > 0) {
+                const uniqueNewWords = newWords.slice(bestOverlap);
+                if (uniqueNewWords.length === 0) {
+                    console.log(`⚠️ Deduplication: New text is entirely duplicate, skipping`);
+                    return existingText; // Entire new text was duplicate
+                }
+                console.log(`✅ Deduplication: Appending ${uniqueNewWords.length} new words (removed ${bestOverlap} duplicate words)`);
+                return existingText + ' ' + uniqueNewWords.join(' ');
+            } else {
+                // No overlap found - this might be a problem, log it
+                console.log(`⚠️ Deduplication: No overlap found, appending full text (${newWords.length} words)`);
+                return existingText + ' ' + newText;
+            }
+        }
+
+        // Track chunk processing state
+        const chunkStates = {
+            voxtral: { lastChunkText: '', chunkIndex: 0 },
+            parakeet: { lastChunkText: '', chunkIndex: 0 },
+            faster: { lastChunkText: '', chunkIndex: 0 }
+            // turbo: { lastChunkText: '', chunkIndex: 0 }
+        };
+
         // Initialize WebSocket connections
         servers.forEach(server => {
             const ws = new WebSocket(server.url);
@@ -390,12 +462,28 @@
                     console.log(`[${server.displayName}] Received transcription: ${data.text}`);
 
                     if (data.text && data.text.trim()) {
-                        // Update full transcript with complete text
-                        fullTranscripts[server.name] = data.text.trim();
+                        const newText = data.text.trim();
+
+                        // Smart deduplication: merge with overlap detection
+                        // Use large window (300 words ≈ 30 seconds) to handle sliding window transcriptions
+                        fullTranscripts[server.name] = mergeTranscriptWithOverlap(
+                            fullTranscripts[server.name],
+                            newText,
+                            300  // Check up to 300 words for overlap (handles 30s sliding windows)
+                        );
+
                         renderFullTranscript(server.name);
 
+                        // Log deduplication info
+                        const state = chunkStates[server.name];
+                        if (state.lastChunkText) {
+                            console.log(`[${server.displayName}] Chunk ${state.chunkIndex}: Deduplicated successfully`);
+                        }
+                        state.lastChunkText = newText;
+                        state.chunkIndex++;
+
                         // Extract only the last sentence for the streaming view
-                        const lastSentence = getLastSentence(data.text.trim());
+                        const lastSentence = getLastSentence(newText);
 
                         if (lastSentence) {
                             // Check if this is a duplicate of the previous sentence
@@ -484,7 +572,8 @@
             if (items.length === 0) {
                 textEl.innerHTML = '<em style="color: #999;">Listening...</em>';
             } else {
-                textEl.innerHTML = items.map(item =>
+                // Reverse order: newest sentences first (at top)
+                textEl.innerHTML = items.slice().reverse().map(item =>
                     `<span class="sentence ${item.isPartial ? 'partial' : ''}">${item.text}</span>`
                 ).join('');
             }
@@ -580,14 +669,19 @@
             // Clear transcripts
             transcripts.voxtral = [];
             transcripts.parakeet = [];
-            transcripts.whisper = [];
             transcripts.faster = [];
+            // transcripts.turbo = [];
 
             // Clear full transcripts
             fullTranscripts.voxtral = '';
             fullTranscripts.parakeet = '';
-            fullTranscripts.whisper = '';
             fullTranscripts.faster = '';
+            // fullTranscripts.turbo = '';
+
+            // Reset chunk states for clean deduplication
+            Object.keys(chunkStates).forEach(key => {
+                chunkStates[key] = { lastChunkText: '', chunkIndex: 0 };
+            });
 
             // Update UI
             servers.forEach(server => {
@@ -598,9 +692,11 @@
             });
 
             // Stream chunks synchronized with playback
-            // Larger chunks provide more context for better accuracy
-            const chunkSize = 16000 * 2 * 3.5; // 3.5 seconds of audio at 16kHz, 16-bit
-            const intervalMs = 3500; // Send every 3.5 seconds
+            // Optimized: 5-second chunks for good balance between latency and accuracy
+            // With smart deduplication, we get clean transcripts without repetition
+            const CHUNK_DURATION_SECONDS = 5;  // 5 seconds = ~0.5s processing delay
+            const chunkSize = 16000 * 2 * CHUNK_DURATION_SECONDS; // 16kHz, 16-bit PCM
+            const intervalMs = CHUNK_DURATION_SECONDS * 1000; // Send every 5 seconds
 
             streamInterval = setInterval(() => {
                 if (audioPlayer.paused || currentPosition >= pcmData.byteLength) {

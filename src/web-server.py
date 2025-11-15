@@ -27,10 +27,10 @@ class WebServerHandler(SimpleHTTPRequestHandler):
             self.send_file_list()
             return
 
-        # Redirect root to realtime-transcription.html
+        # Redirect root to audio-playout-transcription.html
         if path == '/' or path == '':
             self.send_response(302)
-            self.send_header('Location', '/realtime-transcription.html')
+            self.send_header('Location', '/audio-playout-transcription.html')
             self.end_headers()
             return
 
