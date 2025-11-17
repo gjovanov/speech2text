@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Install cuda-python FIRST before nemo_toolkit for CUDA graph support
+RUN pip install --no-cache-dir "cuda-python>=12.3.0"
+
 # Install Python dependencies
 RUN pip install --no-cache-dir \
     websockets \
@@ -16,11 +19,15 @@ RUN pip install --no-cache-dir \
     scipy \
     nemo_toolkit[asr]
 
+# Install/upgrade spaCy to latest version and download German model
+RUN pip install --no-cache-dir --upgrade spacy && \
+    python3 -m spacy download de_core_news_sm
+
 # Copy server file
 COPY src/parakeet-python-server.py .
 
 # Expose port
 EXPOSE 5002
 
-# Run server
-CMD ["python3", "parakeet-python-server.py"]
+# Run server with unbuffered output
+CMD ["python3", "-u", "parakeet-python-server.py"]

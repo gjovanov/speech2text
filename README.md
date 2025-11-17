@@ -63,8 +63,8 @@ graph TB
 
     subgraph "Web Server"
         WebUI[Static Web Server<br/>Port 8000]
-        HTML1[audio-playout-transcription.html]
-        HTML2[audio-streaming-transcription.html]
+        HTML1[vod-transcription.html]
+        HTML2[live-transcription.html]
     end
 
     subgraph "Transcription Servers"
@@ -188,10 +188,10 @@ graph TB
 
 The project includes two web interfaces:
 
-### 1. **Real-Time Streaming Mode** (`audio-streaming-transcription.html`)
+### 1. **Real-Time Streaming Mode** (`live-transcription.html`)
 Watch transcriptions appear word-by-word as the audio plays. It's like watching subtitles being written in real-time by three different people. The suspense! The drama! The occasional spelling mistakes!
 
-### 2. **Comparison Mode** (`audio-playout-transcription.html`)
+### 2. **Comparison Mode** (`vod-transcription.html`)
 Press a button, wait a few seconds, and BAM! All three complete transcriptions side-by-side. Great for comparing accuracy (and finding out which model thinks "Ernährung" sounds like "Entenbraten").
 
 ## 👤 User Flow
@@ -200,7 +200,7 @@ Press a button, wait a few seconds, and BAM! All three complete transcriptions s
 
 ```mermaid
 flowchart TD
-    Start([User Opens App]) --> LoadPage[Load audio-streaming-transcription.html]
+    Start([User Opens App]) --> LoadPage[Load live-transcription.html]
     LoadPage --> Connect{Connect to<br/>3 Servers}
 
     Connect -->|WebSocket| Server1[Voxtral :5000]
@@ -259,7 +259,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start([User Opens App]) --> LoadPage[Load audio-playout-transcription.html]
+    Start([User Opens App]) --> LoadPage[Load vod-transcription.html]
     LoadPage --> Connect{Connect to Servers}
 
     Connect --> Check{All Connected?}
@@ -573,7 +573,7 @@ nohup python3 parakeet-python-server.py > parakeet.log 2>&1 &
 ## 🎪 Using the App
 
 ### Option 1: Real-Time Streaming
-1. Open `http://localhost/audio-streaming-transcription.html` (or `http://your-domain/`)
+1. Open `http://localhost/live-transcription.html` (or `http://your-domain/`)
 2. Wait for all 3 servers to connect (you'll see "Connected ✓")
 3. Select an audio file from the dropdown
 4. Press **Play** on the audio player
@@ -585,7 +585,7 @@ nohup python3 parakeet-python-server.py > parakeet.log 2>&1 &
 - ⚡ Faster-Whisper shows complete sentences (thanks, spaCy!)
 
 ### Option 2: Side-by-Side Comparison
-1. Open `http://localhost/audio-playout-transcription.html` (or `http://your-domain/audio-playout-transcription.html`)
+1. Open `http://localhost/vod-transcription.html` (or `http://your-domain/vod-transcription.html`)
 2. Wait for connections
 3. Click "**Transcribe Now (All Servers)**"
 4. Wait 5-10 seconds
@@ -1058,8 +1058,8 @@ text2speech/
 │   ├── whisper-gpu-server.py      # Faster-Whisper + spaCy server (port 5001)
 │   ├── parakeet-python-server.py  # Parakeet TDT GPU server (port 5002)
 │   └── html/
-│       ├── audio-streaming-transcription.html  # Real-time streaming UI
-│       ├── audio-playout-transcription.html            # Side-by-side comparison UI
+│       ├── live-transcription.html  # Real-time streaming UI
+│       ├── vod-transcription.html            # Side-by-side comparison UI
 │       └── test-debug.html                        # Debug interface for testing
 ├── media/                         # Audio samples (9 German audio files)
 ├── Dockerfile.voxtral             # Docker image for Voxtral server

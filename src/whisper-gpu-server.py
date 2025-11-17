@@ -13,21 +13,34 @@ import io
 import struct
 from datetime import datetime
 import spacy
+import torch
 
-# Initialize model
-# Note: GPU mode requires cuDNN which may not be installed
-# CPU mode with faster-whisper is still 3-5x faster than transformers.js
+# Initialize model - try GPU first, fall back to CPU
 print("Loading faster-whisper model...")
-print("Note: GPU mode requires cuDNN. Trying CPU mode (still faster than transformers.js)...")
 
-model = WhisperModel(
-    "small",
-    device="cpu",
-    compute_type="int8"  # Good balance of speed and accuracy
-)
-print(f"✅ Model loaded successfully on CPU with int8 (faster-whisper)")
-print(f"   Expected speed: 3-5x faster than transformers.js Whisper")
-device_info = "CPU (faster-whisper int8)"
+# Check for GPU availability
+device = "cpu" # "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
+
+if device == "cuda":
+    print(f"GPU detected: {torch.cuda.get_device_name(0)}")
+    print(f"CUDA version: {torch.version.cuda}")
+    model = WhisperModel(
+        "small",
+        device="cuda",
+        compute_type="float16"  # Use float16 for GPU
+    )
+    device_info = f"GPU (faster-whisper float16, small) - {torch.cuda.get_device_name(0)}"
+    print(f"✅ Model loaded successfully on GPU with float16")
+else:
+    print("No GPU detected, using CPU")
+    model = WhisperModel(
+        "small",
+        device="cpu",
+        compute_type="int8"  # Good balance of speed and accuracy on CPU
+    )
+    device_info = "CPU (faster-whisper int8, small)"
+    print(f"✅ Model loaded successfully on CPU with int8")
 
 # Load spaCy German model for better sentence detection
 print("Loading spaCy German model for sentence detection...")
@@ -39,6 +52,7 @@ audio_buffers = {}
 window_positions = {}  # Track window positions for each client
 full_transcripts = {}  # Store accumulated full transcript per client
 last_window_starts = {}  # Track last window start position for each client
+completed_transcripts = {}  # Store text from completed windows (before current window)
 
 def merge_with_overlap(existing_text, new_text, max_overlap_words=50):
     """
@@ -79,16 +93,127 @@ def merge_with_overlap(existing_text, new_text, max_overlap_words=50):
         return (existing_text + " " + new_text).strip()
 
 def extract_last_sentence(text):
-    """Extract the last sentence from text using spaCy."""
+    """
+    Extract the last sentence(s) from text using spaCy.
+    Applies heuristic: if last sentence has ≤3 words, include previous sentences.
+    - Last sentence ≤3 words + previous >3 words = return last 2 sentences
+    - Last sentence ≤3 words + previous ≤3 words = return last 3 sentences (max)
+    - Last sentence >3 words = return only last sentence
+    """
     if not text.strip():
         return ""
 
     doc = nlp(text.strip())
     sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
 
-    if sentences:
-        return sentences[-1]
-    return text.strip()
+    if not sentences:
+        return text.strip()
+
+    # First, handle date/abbreviation fragments (e.g., "19. November")
+    # Merge if the "previous sentence" is very short and looks like a fragment
+    if len(sentences) >= 2:
+        last_sent = sentences[-1]
+        prev_sent = sentences[-2]
+
+        if len(prev_sent) < 10:  # Short fragment
+            is_likely_fragment = (
+                prev_sent[-1] == '.' and
+                (prev_sent[:-1].replace('.', '').isdigit() or  # Number like "19."
+                 len(prev_sent.split()) == 1)  # Single word abbreviation
+            )
+
+            if is_likely_fragment:
+                # Merge the fragment with the following sentence
+                sentences[-2] = prev_sent + " " + last_sent
+                sentences.pop()  # Remove the last sentence (now merged)
+
+    # Now apply the word count heuristic
+    last_sentence = sentences[-1]
+    last_word_count = len(last_sentence.split())
+
+    if last_word_count <= 3 and len(sentences) > 1:
+        # Last sentence has ≤3 words, check previous
+        prev_sentence = sentences[-2]
+        prev_word_count = len(prev_sentence.split())
+
+        if prev_word_count <= 3 and len(sentences) > 2:
+            # Both last and previous have ≤3 words, return last 3 sentences
+            return " ".join(sentences[-3:])
+        else:
+            # Previous has >3 words, return last 2 sentences
+            return " ".join(sentences[-2:])
+
+    # Last sentence has >3 words, return only it
+    return last_sentence
+
+def chunk_audio_with_overlap(audio_array, sample_rate=16000, chunk_seconds=30, overlap_seconds=3):
+    """
+    Split audio into overlapping chunks for efficient processing.
+
+    Args:
+        audio_array: Numpy array of audio samples
+        sample_rate: Sample rate in Hz (default 16000)
+        chunk_seconds: Length of each chunk in seconds (default 30)
+        overlap_seconds: Overlap between chunks in seconds (default 3)
+
+    Returns:
+        List of audio chunks with metadata
+    """
+    chunk_samples = chunk_seconds * sample_rate
+    overlap_samples = overlap_seconds * sample_rate
+    stride = chunk_samples - overlap_samples
+
+    chunks = []
+    for start_idx in range(0, len(audio_array), stride):
+        end_idx = min(start_idx + chunk_samples, len(audio_array))
+        chunk = audio_array[start_idx:end_idx]
+
+        # Store metadata for intelligent merging
+        chunks.append({
+            'audio': chunk,
+            'start_time': start_idx / sample_rate,
+            'end_time': end_idx / sample_rate,
+            'is_first': start_idx == 0,
+            'is_last': end_idx >= len(audio_array)
+        })
+
+    return chunks
+
+def merge_transcriptions(chunk_results, overlap_seconds=3):
+    """
+    Intelligently merge transcriptions from overlapping chunks.
+    Removes duplicate text in overlapping regions.
+    """
+    if not chunk_results:
+        return ""
+
+    if len(chunk_results) == 1:
+        return chunk_results[0]['text']
+
+    merged_text = chunk_results[0]['text']
+
+    for i in range(1, len(chunk_results)):
+        current_text = chunk_results[i]['text']
+
+        # Simple word-based merging: take last ~10 words from previous,
+        # first ~10 words from current, find overlap
+        prev_words = merged_text.split()
+        curr_words = current_text.split()
+
+        # Find overlap by checking last N words of previous against first M words of current
+        overlap_found = False
+        for overlap_len in range(min(15, len(prev_words), len(curr_words)), 0, -1):
+            if prev_words[-overlap_len:] == curr_words[:overlap_len]:
+                # Found overlap, merge by taking current from after overlap
+                merged_text = merged_text + " " + " ".join(curr_words[overlap_len:])
+                overlap_found = True
+                break
+
+        if not overlap_found:
+            # No overlap found, just concatenate with space
+            merged_text = merged_text + " " + current_text
+
+    return merged_text.strip()
 
 async def handle_client(websocket):
     client_id = id(websocket)
@@ -96,6 +221,7 @@ async def handle_client(websocket):
     window_positions[client_id] = 0  # Track current window end position
     full_transcripts[client_id] = ""  # Accumulated full transcript
     last_window_starts[client_id] = None  # Track last window start position
+    completed_transcripts[client_id] = ""  # Text from completed windows
 
     print(f"Client {client_id} connected")
 
@@ -137,7 +263,7 @@ async def handle_client(websocket):
                     }))
 
                 elif data.get("type") == "transcribe":
-                    # Full transcription
+                    # Full transcription (VoD mode)
                     if not audio_buffers[client_id]:
                         await websocket.send(json.dumps({
                             "type": "error",
@@ -159,50 +285,152 @@ async def handle_client(websocket):
 
                         # Convert bytes to numpy array (16-bit PCM to float32)
                         audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                        audio_duration = len(audio_data) / (16000 * 2)
 
-                        # Transcribe with faster-whisper (GPU)
-                        segments, info = model.transcribe(
-                            audio_np,
-                            language="de",  # German
-                            beam_size=5,
-                            vad_filter=True,  # Voice activity detection
-                            word_timestamps=True
-                        )
+                        # Use chunked processing for long audio files (> 60 seconds)
+                        CHUNK_THRESHOLD = 60  # seconds
 
-                        # Collect all segments
-                        full_text = ""
-                        chunks = []
-                        for segment in segments:
-                            full_text += segment.text
-                            chunks.append({
-                                "timestamp": [segment.start, segment.end],
-                                "text": segment.text
-                            })
+                        if audio_duration > CHUNK_THRESHOLD:
+                            print(f"[Whisper] Long audio detected ({audio_duration:.1f}s), using chunked processing")
+
+                            # Split into chunks
+                            chunks_data = chunk_audio_with_overlap(
+                                audio_np,
+                                sample_rate=16000,
+                                chunk_seconds=30,
+                                overlap_seconds=3
+                            )
+
+                            chunk_results = []
+                            all_segments = []
+
+                            # Process each chunk
+                            for i, chunk_data in enumerate(chunks_data):
+                                chunk_audio = chunk_data['audio']
+                                chunk_duration = len(chunk_audio) / 16000
+
+                                # Transcribe chunk
+                                chunk_start = datetime.now()
+                                segments, info = model.transcribe(
+                                    chunk_audio,
+                                    language="de",
+                                    beam_size=5,
+                                    vad_filter=True,
+                                    word_timestamps=True
+                                )
+
+                                # Collect chunk text and segments with word timestamps
+                                chunk_text = ""
+                                for segment in segments:
+                                    chunk_text += segment.text
+
+                                    # Extract word-level timestamps
+                                    words_data = []
+                                    if hasattr(segment, 'words') and segment.words:
+                                        for word in segment.words:
+                                            words_data.append({
+                                                "word": word.word,
+                                                "start": word.start + chunk_data['start_time'],
+                                                "end": word.end + chunk_data['start_time']
+                                            })
+
+                                    # Adjust timestamps relative to full audio
+                                    all_segments.append({
+                                        "timestamp": [segment.start + chunk_data['start_time'], segment.end + chunk_data['start_time']],
+                                        "text": segment.text,
+                                        "words": words_data
+                                    })
+
+                                chunk_time = (datetime.now() - chunk_start).total_seconds()
+
+                                chunk_results.append({
+                                    'text': chunk_text,
+                                    'start_time': chunk_data['start_time'],
+                                    'end_time': chunk_data['end_time']
+                                })
+
+                                print(f"[Whisper] Chunk {i+1}/{len(chunks_data)}: {chunk_duration:.1f}s → {chunk_time:.2f}s ({chunk_duration/chunk_time:.1f}x RT) - {chunk_text[:50]}...")
+
+                                # Send progress update
+                                progress_pct = ((i + 1) / len(chunks_data)) * 100
+                                await websocket.send(json.dumps({
+                                    "type": "processing",
+                                    "message": f"Processing chunk {i+1}/{len(chunks_data)} ({progress_pct:.0f}%)",
+                                    "progress": progress_pct
+                                }))
+
+                            # Merge all transcriptions
+                            full_text = merge_transcriptions(chunk_results, overlap_seconds=3)
+                            print(f"[Whisper] Merged {len(chunks_data)} chunks into final transcription")
+                            print(f"[Whisper] Collected {len(all_segments)} segments with timestamps")
+
+                        else:
+                            # Original code for short audio (< 60 seconds)
+                            print(f"[Whisper] Short audio ({audio_duration:.1f}s), using standard processing")
+
+                            # Transcribe with faster-whisper
+                            segments, info = model.transcribe(
+                                audio_np,
+                                language="de",  # German
+                                beam_size=5,
+                                vad_filter=True,  # Voice activity detection
+                                word_timestamps=True
+                            )
+
+                            # Collect all segments with word timestamps
+                            full_text = ""
+                            all_segments = []
+                            for segment in segments:
+                                full_text += segment.text
+
+                                # Extract word-level timestamps
+                                words_data = []
+                                if hasattr(segment, 'words') and segment.words:
+                                    for word in segment.words:
+                                        words_data.append({
+                                            "word": word.word,
+                                            "start": word.start,
+                                            "end": word.end
+                                        })
+
+                                all_segments.append({
+                                    "timestamp": [segment.start, segment.end],
+                                    "text": segment.text,
+                                    "words": words_data
+                                })
+
+                            print(f"[Whisper] Short audio: Collected {len(all_segments)} segments with timestamps")
 
                         processing_time = (datetime.now() - start_time).total_seconds()
-                        audio_duration = len(audio_data) / (16000 * 2)
                         rtfx = audio_duration / processing_time if processing_time > 0 else 0
 
-                        await websocket.send(json.dumps({
+                        print(f"[Whisper] Sending response with {len(all_segments)} segments")
+                        print(f"[Whisper] Full text length: {len(full_text)} characters")
+                        print(f"[Whisper] First 100 chars: {full_text[:100]}")
+
+                        response = {
                             "type": "transcription",
                             "text": full_text,
-                            "chunks": chunks,
-                            "model": "small",
-                            "device": "cuda",
-                            "language": info.language,
-                            "language_probability": info.language_probability,
+                            "segments": all_segments,
+                            "model": "large-v3",
+                            "device": device_info,
                             "performance": {
                                 "processingTime": f"{processing_time:.2f}s",
                                 "audioDuration": f"{audio_duration:.2f}s",
                                 "rtfx": f"{rtfx:.2f}x"
                             }
-                        }))
+                        }
+
+                        await websocket.send(json.dumps(response))
+                        print(f"[Whisper] Response sent successfully")
 
                         # Clear buffer
                         audio_buffers[client_id] = []
 
                     except Exception as e:
                         print(f"Transcription error: {e}")
+                        import traceback
+                        traceback.print_exc()
                         await websocket.send(json.dumps({
                             "type": "error",
                             "message": str(e)
@@ -265,7 +493,7 @@ async def handle_client(websocket):
                             language="de",
                             beam_size=5,
                             vad_filter=True,
-                            word_timestamps=False
+                            word_timestamps=True
                         )
 
                         # Get text from this window
@@ -278,22 +506,24 @@ async def handle_client(websocket):
 
                         # Growing window (same start) vs new window (different start)
                         if window_start_time == last_window_starts[client_id]:
-                            # Growing window - REPLACE transcript (re-transcribing same audio)
-                            full_transcripts[client_id] = window_text
-                            print(f"[Whisper Stream] Growing window - replacing transcript")
+                            # Growing window - keep completed portion, replace current window portion
+                            full_transcripts[client_id] = completed_transcripts[client_id] + window_text
+                            print(f"[Whisper Stream] Growing window - keeping completed ({len(completed_transcripts[client_id])} chars) + new window")
                         else:
-                            # New window - MERGE with overlap detection
+                            # New window - merge previous full transcript into completed, start new window
                             if full_transcripts[client_id]:
-                                full_transcripts[client_id] = merge_with_overlap(
+                                # Merge the previous window's text into completed transcripts
+                                completed_transcripts[client_id] = merge_with_overlap(
+                                    completed_transcripts[client_id],
                                     full_transcripts[client_id],
-                                    window_text,
                                     max_overlap_words=100  # Larger window for 2s overlap
                                 )
-                                print(f"[Whisper Stream] New window - merging with overlap detection")
-                            else:
-                                # First window ever
-                                full_transcripts[client_id] = window_text
-                                print(f"[Whisper Stream] First window - initializing transcript")
+                                print(f"[Whisper Stream] New window - merged previous window into completed")
+
+                            # Now start the new window
+                            full_transcripts[client_id] = completed_transcripts[client_id] + window_text
+                            print(f"[Whisper Stream] New window - completed ({len(completed_transcripts[client_id])} chars) + new window")
+
                             # Update last window start
                             last_window_starts[client_id] = window_start_time
 
@@ -340,6 +570,7 @@ async def handle_client(websocket):
                     window_positions[client_id] = 0
                     full_transcripts[client_id] = ""
                     last_window_starts[client_id] = None
+                    completed_transcripts[client_id] = ""
                     await websocket.send(json.dumps({
                         "type": "cleared",
                         "message": "Audio buffer cleared"
@@ -356,11 +587,13 @@ async def handle_client(websocket):
             del full_transcripts[client_id]
         if client_id in last_window_starts:
             del last_window_starts[client_id]
+        if client_id in completed_transcripts:
+            del completed_transcripts[client_id]
 
 async def main():
     print("Starting faster-whisper WebSocket server on ws://localhost:5001/transcribe")
     print("Device: CUDA (NVIDIA GPU)")
-    print("Model: Whisper Small")
+    print("Model: Whisper large-v3")
 
     async with websockets.serve(handle_client, "0.0.0.0", 5001):
         await asyncio.Future()  # Run forever

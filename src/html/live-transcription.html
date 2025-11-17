@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Streaming Transcription - All Servers</title>
+    <title>Live Transcription - Real-time Audio Streaming</title>
 
     <!-- Favicons -->
     <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -203,7 +203,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎙️ Real-time Streaming Transcription - All Servers</h1>
+        <h1>🎙️ Live Transcription - Real-time Audio Streaming</h1>
 
         <div class="audio-section">
             <h3>Test Audio (German)</h3>
@@ -367,7 +367,9 @@
                         // Select first file by default
                         if (index === 0) {
                             option.selected = true;
-                            document.getElementById('audioPlayer').src = file.path;
+                            selectedAudioFile = file.path;
+                            // Load audio and set player when ready
+                            loadAudioBufferAndSetPlayer();
                         }
                     });
 
@@ -474,19 +476,14 @@
                         if (data.lastSentence && data.lastSentence.trim()) {
                             const lastSentence = data.lastSentence.trim();
 
-                            // Check if this is a duplicate
-                            const previousTranscripts = transcripts[server.name];
-                            const isDuplicate = previousTranscripts.length > 0 &&
-                                previousTranscripts[previousTranscripts.length - 1].text === lastSentence;
-
-                            if (!isDuplicate) {
-                                transcripts[server.name].push({
-                                    text: lastSentence,
-                                    isPartial: data.isPartial || data.type === 'partial_transcription'
-                                });
-                                renderTranscripts(server.name);
-                                console.log(`[${server.displayName}] New sentence: ${lastSentence}`);
-                            }
+                            // Only keep the latest sentence (replace, don't push)
+                            // This displays only the most recent 84 chars (2 rows × 42 chars)
+                            transcripts[server.name] = [{
+                                text: lastSentence,
+                                isPartial: data.isPartial || data.type === 'partial_transcription'
+                            }];
+                            renderTranscripts(server.name);
+                            console.log(`[${server.displayName}] Latest sentence: ${lastSentence}`);
                         }
 
                         // Log windowing info if available
@@ -510,17 +507,13 @@
                         const lastSentence = getLastSentence(newText);
 
                         if (lastSentence) {
-                            const previousTranscripts = transcripts[server.name];
-                            const isDuplicate = previousTranscripts.length > 0 &&
-                                previousTranscripts[previousTranscripts.length - 1].text === lastSentence;
-
-                            if (!isDuplicate) {
-                                transcripts[server.name].push({
-                                    text: lastSentence,
-                                    isPartial: data.isPartial || data.type === 'partial_transcription'
-                                });
-                                renderTranscripts(server.name);
-                            }
+                            // Only keep the latest sentence (replace, don't push)
+                            // This displays only the most recent 84 chars (2 rows × 42 chars)
+                            transcripts[server.name] = [{
+                                text: lastSentence,
+                                isPartial: data.isPartial || data.type === 'partial_transcription'
+                            }];
+                            renderTranscripts(server.name);
                         }
                     }
 
@@ -592,10 +585,11 @@
             if (items.length === 0) {
                 textEl.innerHTML = '<em style="color: #999;">Listening...</em>';
             } else {
-                // Reverse order: newest sentences first (at top)
-                textEl.innerHTML = items.slice().reverse().map(item =>
-                    `<span class="sentence ${item.isPartial ? 'partial' : ''}">${item.text}</span>`
-                ).join('');
+                // Server already applies the sentence heuristic, just display the latest
+                const latestItem = items[items.length - 1];
+                const latestText = latestItem.text;
+
+                textEl.innerHTML = `<span class="sentence ${latestItem.isPartial ? 'partial' : ''}">${latestText}</span>`;
             }
         }
 
@@ -612,24 +606,141 @@
             }
         }
 
+        // Helper function to continue downloading in background after early transcription start
+        async function continueDownloadInBackground(reader, chunks, receivedLength, contentLength) {
+            try {
+                console.log('📦 Continuing download in background...');
+
+                // Continue reading the stream
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+
+                    chunks.push(value);
+                    receivedLength += value.length;
+
+                    const percent = contentLength ? ((receivedLength / contentLength) * 100).toFixed(1) : '?';
+                    if (receivedLength % (5 * 1024 * 1024) < 16384) { // Log every ~5MB
+                        console.log(`📥 Downloaded ${percent}% (${(receivedLength / 1024 / 1024).toFixed(1)} MB)`);
+                    }
+                }
+
+                // Download complete - decode full audio
+                console.log(`✅ Background download complete (100%)`);
+                const fullData = new Uint8Array(receivedLength);
+                let position = 0;
+                for (let chunk of chunks) {
+                    fullData.set(chunk, position);
+                    position += chunk.length;
+                }
+
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                const fullBuffer = await audioContext.decodeAudioData(fullData.buffer);
+                audioBuffer = fullBuffer; // Update with full buffer
+
+                console.log(`🎵 Full audio loaded in background: ${fullBuffer.duration.toFixed(2)}s at ${fullBuffer.sampleRate}Hz`);
+            } catch (error) {
+                console.error('❌ Error in background download:', error);
+            }
+        }
+
+        // Load audio and set player when ready
+        async function loadAudioBufferAndSetPlayer() {
+            const buffer = await loadAudioBuffer();
+            if (buffer && selectedAudioFile) {
+                console.log('✅ Audio ready - enabling playback');
+                audioPlayer.src = selectedAudioFile;
+                audioPlayer.load();
+            }
+        }
+
         async function loadAudioBuffer() {
             if (audioBuffer) return audioBuffer;
 
             try {
-                // Get audio source from player
-                const audioSrc = audioPlayer.src || audioPlayer.currentSrc;
-                console.log(`Loading audio from: ${audioSrc}`);
+                // Get audio source from selected file (not from player to avoid double download)
+                const audioSrc = selectedAudioFile;
+                if (!audioSrc) {
+                    console.error('No audio file selected');
+                    return null;
+                }
+                console.log(`🔄 Progressive audio loading started from: ${audioSrc}`);
 
                 const response = await fetch(audioSrc);
-                const arrayBuffer = await response.arrayBuffer();
+                const contentLength = +response.headers.get('Content-Length') || 0;
+                const reader = response.body.getReader();
 
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                let receivedLength = 0;
+                let chunks = [];
+                let hasStartedTranscription = false;
 
-                console.log(`Audio loaded: ${audioBuffer.duration.toFixed(2)}s at ${audioBuffer.sampleRate}Hz`);
+                // Read stream progressively
+                while (true) {
+                    const {done, value} = await reader.read();
+
+                    if (done) break;
+
+                    chunks.push(value);
+                    receivedLength += value.length;
+
+                    const percent = contentLength ? ((receivedLength / contentLength) * 100).toFixed(1) : '?';
+                    console.log(`📥 Downloaded ${percent}% (${(receivedLength / 1024 / 1024).toFixed(1)} MB)`);
+
+                    // Try to decode and start transcription once we have ~10% of the file
+                    if (!hasStartedTranscription && receivedLength >= contentLength * 0.1) {
+                        try {
+                            // Concatenate chunks received so far
+                            const partialData = new Uint8Array(receivedLength);
+                            let position = 0;
+                            for (let chunk of chunks) {
+                                partialData.set(chunk, position);
+                                position += chunk.length;
+                            }
+
+                            // Try to decode partial audio
+                            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            const partialBuffer = await audioContext.decodeAudioData(partialData.buffer.slice(0));
+
+                            console.log(`✅ Partial audio decoded at ${percent}%: ${partialBuffer.duration.toFixed(2)}s`);
+                            audioBuffer = partialBuffer;
+                            hasStartedTranscription = true;
+
+                            // Trigger streaming to start with partial audio
+                            console.log(`🚀 Starting transcription early with ${percent}% downloaded`);
+
+                            // Continue download in background and set audio player when done
+                            continueDownloadInBackground(reader, chunks, receivedLength, contentLength);
+
+                            return partialBuffer;
+
+                        } catch (decodeError) {
+                            console.log(`⏳ Not enough data to decode yet (${percent}%), continuing download...`);
+                        }
+                    }
+                }
+
+                // Download complete - decode full audio
+                console.log(`✅ Download complete (100%)`);
+                const fullData = new Uint8Array(receivedLength);
+                let position = 0;
+                for (let chunk of chunks) {
+                    fullData.set(chunk, position);
+                    position += chunk.length;
+                }
+
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                audioBuffer = await audioContext.decodeAudioData(fullData.buffer);
+
+                console.log(`🎵 Full audio loaded: ${audioBuffer.duration.toFixed(2)}s at ${audioBuffer.sampleRate}Hz`);
+
                 return audioBuffer;
+
             } catch (error) {
-                console.error('Error loading audio:', error);
+                console.error('❌ Error loading audio:', error);
                 return null;
             }
         }
@@ -800,16 +911,19 @@
             });
         }
 
+        // Store selected file URL separately to prevent browser auto-download
+        let selectedAudioFile = null;
+
         // Audio selection change handler
         const audioSelect = document.getElementById('audioSelect');
-        audioSelect.addEventListener('change', (e) => {
-            const selectedFile = e.target.value;
-            console.log(`Selected audio: ${selectedFile}`);
+        audioSelect.addEventListener('change', async (e) => {
+            selectedAudioFile = e.target.value;
+            console.log(`Selected audio: ${selectedAudioFile}`);
 
-            // Stop current playback (this will trigger the pause event which stops streaming)
+            // Stop current playback
             audioPlayer.pause();
 
-            // Stop streaming interval without sending final chunks
+            // Stop streaming interval
             if (streamInterval) {
                 clearInterval(streamInterval);
                 streamInterval = null;
@@ -819,7 +933,7 @@
             servers.forEach(server => {
                 transcripts[server.name] = [];
                 fullTranscripts[server.name] = '';
-                updateText(server.name, '<em>Select audio and press play...</em>');
+                updateText(server.name, '<em>Click play to start transcription...</em>');
                 document.getElementById(`full-text-${server.name}`).innerHTML = '<em style="color: #999;">Waiting for audio...</em>';
                 document.getElementById(`${server.name}-box`).classList.remove('active');
             });
@@ -835,15 +949,23 @@
             audioBuffer = null;
             currentPosition = 0;
 
-            // Update audio source and wait for it to be ready
-            audioPlayer.src = selectedFile;
-            audioPlayer.load();
+            // Don't set audioPlayer.src yet - let it be set after audio loads
+            // This prevents double download
+            audioPlayer.src = '';
+
+            // Start loading audio buffer - will set audioPlayer.src when ready
+            console.log('🔄 Loading audio...');
+            loadAudioBufferAndSetPlayer();
         });
 
         // Event listeners
         audioPlayer.addEventListener('play', () => {
-            console.log('Audio playing - starting streaming to all servers');
-            startStreaming();
+            console.log('Audio playing');
+            // Streaming already started on file selection, no need to restart
+            if (!streamInterval) {
+                console.log('Starting streaming (triggered by play)');
+                startStreaming();
+            }
         });
 
         audioPlayer.addEventListener('pause', () => {
@@ -883,6 +1005,12 @@
         });
 
         audioPlayer.addEventListener('error', (e) => {
+            // Ignore "Empty src" errors (expected when we clear src for progressive loading)
+            if (audioPlayer.error?.code === 4 && audioPlayer.error?.message?.includes('Empty src')) {
+                console.log('ℹ️ Audio src cleared (this is expected for progressive loading)');
+                return;
+            }
+
             console.error('❌ Audio loading error:', audioPlayer.error);
             console.error('   Error code:', audioPlayer.error?.code);
             console.error('   Error message:', audioPlayer.error?.message);
@@ -957,14 +1085,13 @@
                         // Reload file list from server
                         await loadAudioFiles();
 
-                        // Auto-select the newly uploaded file
+                        // Auto-select the newly uploaded file (trigger change event for progressive loading)
                         const audioSelect = document.getElementById('audioSelect');
                         for (let i = 0; i < audioSelect.options.length; i++) {
                             if (audioSelect.options[i].text === response.filename) {
                                 audioSelect.selectedIndex = i;
-                                const audioPlayer = document.getElementById('audioPlayer');
-                                audioPlayer.src = audioSelect.options[i].value;
-                                audioPlayer.load();
+                                // Trigger change event which handles progressive loading
+                                audioSelect.dispatchEvent(new Event('change'));
                                 break;
                             }
                         }

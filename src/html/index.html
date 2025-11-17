@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech-to-Text Transcription Service</title>
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="favicon-48x48.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="manifest" href="site.webmanifest">
+    <meta name="theme-color" content="#667eea">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: white;
+            border-radius: 24px;
+            padding: 60px 50px;
+            box-shadow: 0 30px 90px rgba(0, 0, 0, 0.4);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 2.5em;
+            margin-bottom: 15px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 1.2em;
+            margin-bottom: 50px;
+        }
+
+        .options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .option-card {
+            background: #f8f9fa;
+            border-radius: 16px;
+            padding: 35px;
+            text-align: center;
+            transition: all 0.3s ease;
+            border: 3px solid transparent;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .option-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.3);
+            border-color: #667eea;
+        }
+
+        .option-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        .option-title {
+            font-size: 1.8em;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .option-description {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            font-size: 1.05em;
+        }
+
+        .option-features {
+            list-style: none;
+            margin-top: 20px;
+            text-align: left;
+        }
+
+        .option-features li {
+            padding: 8px 0;
+            color: #555;
+            display: flex;
+            align-items: center;
+        }
+
+        .option-features li::before {
+            content: "✓";
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 1.2em;
+        }
+
+        .servers-info {
+            background: #e3f2fd;
+            border-radius: 12px;
+            padding: 30px;
+            margin-top: 50px;
+        }
+
+        .servers-info h2 {
+            color: #1976d2;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .server-list {
+            display: grid;
+            gap: 15px;
+        }
+
+        .server-item {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .server-icon {
+            font-size: 1.5em;
+        }
+
+        .server-details {
+            flex: 1;
+        }
+
+        .server-name {
+            font-weight: 700;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .server-desc {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Speech-to-Text Transcription</h1>
+        <p class="subtitle">Choose your transcription mode</p>
+
+        <div class="options">
+            <a href="/vod-transcription.html" class="option-card">
+                <div class="option-icon">⚡</div>
+                <div class="option-title">VoD Transcription</div>
+                <div class="option-description">
+                    Fast batch processing for pre-recorded audio files
+                </div>
+                <ul class="option-features">
+                    <li>Upload & transcribe entire files</li>
+                    <li>Automatic chunking for long audio (>60s)</li>
+                    <li>Progress updates during processing</li>
+                    <li>Best for: podcasts, recordings, meetings</li>
+                </ul>
+            </a>
+
+            <a href="/live-transcription.html" class="option-card">
+                <div class="option-icon">📡</div>
+                <div class="option-title">Live Streaming</div>
+                <div class="option-description">
+                    Real-time transcription with sliding windows
+                </div>
+                <ul class="option-features">
+                    <li>Simulates live audio streaming</li>
+                    <li>30s windows with 2s overlap</li>
+                    <li>Progressive transcript updates</li>
+                    <li>Best for: live audio, real-time analysis</li>
+                </ul>
+            </a>
+        </div>
+
+        <div class="servers-info">
+            <h2>Available Transcription Engines</h2>
+            <div class="server-list">
+                <div class="server-item">
+                    <div class="server-icon">🔶</div>
+                    <div class="server-details">
+                        <div class="server-name">Voxtral Mini (Mistral Cloud API)</div>
+                        <div class="server-desc">Port 5000 • Cloud-based • ~$0.001/min</div>
+                    </div>
+                </div>
+                <div class="server-item">
+                    <div class="server-icon">⚡</div>
+                    <div class="server-details">
+                        <div class="server-name">Faster-Whisper Large-v3</div>
+                        <div class="server-desc">Port 5001 • GPU-accelerated • Best for German ⭐</div>
+                    </div>
+                </div>
+                <div class="server-item">
+                    <div class="server-icon">🚀</div>
+                    <div class="server-details">
+                        <div class="server-name">Parakeet TDT v0.6b-v2</div>
+                        <div class="server-desc">Port 5002 • GPU-accelerated • English-optimized • 8.5x RT</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

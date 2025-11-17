@@ -60,6 +60,7 @@ audio_buffers = {}
 window_positions = {}  # Track window positions for each client
 full_transcripts = {}  # Store accumulated full transcript per client
 last_window_starts = {}  # Track last window start position for each client
+completed_transcripts = {}  # Store text from completed windows (before current window)
 
 def chunk_audio_with_overlap(audio_array, sample_rate=16000, chunk_seconds=30, overlap_seconds=3):
     """
@@ -172,27 +173,65 @@ def merge_with_overlap(existing_text, new_text, max_overlap_words=50):
         return (existing_text + " " + new_text).strip()
 
 def extract_last_sentence(text):
-    """Extract the last sentence from text (simple sentence boundary detection)."""
+    """
+    Extract the last sentence(s) from text using regex-based sentence splitting.
+    Applies heuristic: if last sentence has ≤3 words, include previous sentences.
+    - Last sentence ≤3 words + previous >3 words = return last 2 sentences
+    - Last sentence ≤3 words + previous ≤3 words = return last 3 sentences (max)
+    - Last sentence >3 words = return only last sentence
+    """
     if not text.strip():
         return ""
 
-    # Split by sentence-ending punctuation
     import re
-    sentences = re.split(r'[.!?]+', text.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
+    # Match sentence endings: period/!/? followed by space and capital letter
+    parts = re.split(r'(?<=[.!?])\s+(?=[A-ZÄÖÜ])', text.strip())
+    parts = [s.strip() for s in parts if s.strip()]
 
-    if sentences:
-        # Add punctuation back to last sentence
-        last_sent = sentences[-1]
-        # Find the punctuation that ended this sentence
+    if not parts:
+        return text.strip()
+
+    # First, handle date/abbreviation fragments (e.g., "19. November")
+    if len(parts) >= 2:
+        last_part = parts[-1]
+        prev_part = parts[-2]
+
+        if len(prev_part) < 10 and prev_part.endswith('.'):
+            prev_without_period = prev_part[:-1].replace('.', '')
+            if prev_without_period.isdigit() or len(prev_part.split()) == 1:
+                # Merge the fragment with the following sentence
+                parts[-2] = prev_part + " " + last_part
+                parts.pop()  # Remove the last part (now merged)
+
+    # Now apply the word count heuristic
+    last_sentence = parts[-1]
+    last_word_count = len(last_sentence.split())
+
+    if last_word_count <= 3 and len(parts) > 1:
+        # Last sentence has ≤3 words, check previous
+        prev_sentence = parts[-2]
+        prev_word_count = len(prev_sentence.split())
+
+        if prev_word_count <= 3 and len(parts) > 2:
+            # Both last and previous have ≤3 words, return last 3 sentences
+            result = " ".join(parts[-3:])
+        else:
+            # Previous has >3 words, return last 2 sentences
+            result = " ".join(parts[-2:])
+    else:
+        # Last sentence has >3 words, return only it
+        result = last_sentence
+
+    # Make sure result has proper punctuation
+    if result and result[-1] not in '.!?':
         if text.strip().endswith('.'):
-            last_sent += '.'
+            result += '.'
         elif text.strip().endswith('!'):
-            last_sent += '!'
+            result += '!'
         elif text.strip().endswith('?'):
-            last_sent += '?'
-        return last_sent
-    return text.strip()
+            result += '?'
+
+    return result
 
 async def handle_client(websocket):
     client_id = id(websocket)
@@ -200,6 +239,7 @@ async def handle_client(websocket):
     window_positions[client_id] = 0  # Track current window end position
     full_transcripts[client_id] = ""  # Accumulated full transcript
     last_window_starts[client_id] = None  # Track last window start position
+    completed_transcripts[client_id] = ""  # Text from completed windows
 
     print(f"Client {client_id} connected")
 
@@ -340,7 +380,7 @@ async def handle_client(websocket):
                         await websocket.send(json.dumps({
                             "type": "transcription",
                             "text": text,
-                            "chunks": [],  # Parakeet TDT doesn't return word timestamps by default
+                            "segments": [],  # Parakeet TDT doesn't provide word-level timestamps
                             "model": "parakeet-tdt-0.6b-v3",
                             "device": device_info,
                             "performance": {
@@ -432,22 +472,24 @@ async def handle_client(websocket):
 
                         # Growing window (same start) vs new window (different start)
                         if window_start_time == last_window_starts[client_id]:
-                            # Growing window - REPLACE transcript (re-transcribing same audio)
-                            full_transcripts[client_id] = window_text
-                            print(f"[Parakeet Stream] Growing window - replacing transcript")
+                            # Growing window - keep completed portion, replace current window portion
+                            full_transcripts[client_id] = completed_transcripts[client_id] + window_text
+                            print(f"[Parakeet Stream] Growing window - keeping completed ({len(completed_transcripts[client_id])} chars) + new window")
                         else:
-                            # New window - MERGE with overlap detection
+                            # New window - merge previous full transcript into completed, start new window
                             if full_transcripts[client_id]:
-                                full_transcripts[client_id] = merge_with_overlap(
+                                # Merge the previous window's text into completed transcripts
+                                completed_transcripts[client_id] = merge_with_overlap(
+                                    completed_transcripts[client_id],
                                     full_transcripts[client_id],
-                                    window_text,
                                     max_overlap_words=100  # Larger window for 2s overlap
                                 )
-                                print(f"[Parakeet Stream] New window - merging with overlap detection")
-                            else:
-                                # First window ever
-                                full_transcripts[client_id] = window_text
-                                print(f"[Parakeet Stream] First window - initializing transcript")
+                                print(f"[Parakeet Stream] New window - merged previous window into completed")
+
+                            # Now start the new window
+                            full_transcripts[client_id] = completed_transcripts[client_id] + window_text
+                            print(f"[Parakeet Stream] New window - completed ({len(completed_transcripts[client_id])} chars) + new window")
+
                             # Update last window start
                             last_window_starts[client_id] = window_start_time
 
@@ -495,6 +537,7 @@ async def handle_client(websocket):
                     window_positions[client_id] = 0
                     full_transcripts[client_id] = ""
                     last_window_starts[client_id] = None
+                    completed_transcripts[client_id] = ""
                     await websocket.send(json.dumps({
                         "type": "cleared",
                         "message": "Audio buffer cleared"
@@ -511,6 +554,8 @@ async def handle_client(websocket):
             del full_transcripts[client_id]
         if client_id in last_window_starts:
             del last_window_starts[client_id]
+        if client_id in completed_transcripts:
+            del completed_transcripts[client_id]
 
 async def main():
     print("\n" + "="*60, flush=True)
@@ -522,7 +567,9 @@ async def main():
     print(f"Optimization: Chunked processing for long audio (>60s)", flush=True)
     print("="*60 + "\n", flush=True)
 
+    print("Starting WebSocket server on 0.0.0.0:5002...", flush=True)
     async with websockets.serve(handle_client, "0.0.0.0", 5002):
+        print("✅ WebSocket server is now listening on port 5002", flush=True)
         await asyncio.Future()  # Run forever
 
 if __name__ == "__main__":

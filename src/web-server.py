@@ -27,12 +27,9 @@ class WebServerHandler(SimpleHTTPRequestHandler):
             self.send_file_list()
             return
 
-        # Redirect root to audio-playout-transcription.html
+        # Serve index.html for root path
         if path == '/' or path == '':
-            self.send_response(302)
-            self.send_header('Location', '/audio-playout-transcription.html')
-            self.end_headers()
-            return
+            self.path = '/index.html'
 
         # Let SimpleHTTPRequestHandler handle static files
         super().do_GET()

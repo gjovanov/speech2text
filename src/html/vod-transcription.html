@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Transcription - Server Comparison</title>
+    <title>VoD Transcription - Video on Demand</title>
 
     <!-- Favicons -->
     <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -145,11 +145,71 @@
             min-width: 300px;
             cursor: pointer;
         }
+        /* Word timestamp tooltip styles */
+        .word-with-timestamp {
+            position: relative;
+            cursor: help;
+            border-bottom: 1px dotted #667eea;
+            transition: all 0.2s ease;
+        }
+        .word-with-timestamp:hover {
+            background-color: #f0f4ff;
+            border-bottom-color: #667eea;
+            border-bottom-width: 2px;
+        }
+        .timestamp-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #2c3e50;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            z-index: 1000;
+            margin-bottom: 5px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .timestamp-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: #2c3e50;
+        }
+        .word-with-timestamp:hover .timestamp-tooltip {
+            opacity: 1;
+        }
+        .download-btn {
+            background: #28a745;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            margin-left: 10px;
+            transition: background 0.2s ease;
+        }
+        .download-btn:hover {
+            background: #218838;
+        }
+        .download-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎙️ Real-time Transcription - Server Comparison</h1>
+        <h1>🎬 VoD Transcription - Video on Demand</h1>
 
         <div class="audio-section">
             <h3>Test Audio (German)</h3>
@@ -195,8 +255,11 @@
         <div class="transcriptions">
             <div class="transcription-row" id="row-voxtral">
                 <div class="transcription-header">
-                    <span class="server-name voxtral">🔶 Voxtral (Mistral API)</span>
-                    <span class="model-info">voxtral-mini-latest • Port 5000 • Cloud API ($0.001/min)</span>
+                    <div>
+                        <span class="server-name voxtral">🔶 Voxtral (Mistral API)</span>
+                        <span class="model-info">voxtral-mini-latest • Port 5000 • Cloud API ($0.001/min)</span>
+                    </div>
+                    <button class="download-btn" onclick="downloadTranscriptJSON('voxtral')" id="download-voxtral" disabled>📥 Download JSON</button>
                 </div>
                 <div class="transcription-text empty" id="text-voxtral">
                     Waiting for audio...
@@ -206,8 +269,11 @@
 
             <div class="transcription-row" id="row-parakeet">
                 <div class="transcription-header">
-                    <span class="server-name parakeet">🚀 Parakeet TDT</span>
-                    <span class="model-info">nvidia/parakeet-tdt-0.6b-v2 • Port 5001 • English-optimized</span>
+                    <div>
+                        <span class="server-name parakeet">🚀 Parakeet TDT</span>
+                        <span class="model-info">nvidia/parakeet-tdt-0.6b-v2 • Port 5002 • English-optimized</span>
+                    </div>
+                    <button class="download-btn" onclick="downloadTranscriptJSON('parakeet')" id="download-parakeet" disabled>📥 Download JSON</button>
                 </div>
                 <div class="transcription-text empty" id="text-parakeet">
                     Waiting for audio...
@@ -217,8 +283,11 @@
 
             <div class="transcription-row" id="row-faster">
                 <div class="transcription-header">
-                    <span class="server-name faster">⚡ Faster-Whisper</span>
-                    <span class="model-info">Whisper Small • Port 5001 • faster-whisper (Best for German!) ⭐</span>
+                    <div>
+                        <span class="server-name faster">⚡ Faster-Whisper</span>
+                        <span class="model-info">Whisper Small • Port 5001 • faster-whisper (Best for German!) ⭐</span>
+                    </div>
+                    <button class="download-btn" onclick="downloadTranscriptJSON('faster')" id="download-faster" disabled>📥 Download JSON</button>
                 </div>
                 <div class="transcription-text empty" id="text-faster">
                     Waiting for audio...
@@ -254,6 +323,13 @@
 
         const connections = {};
         let audioData = null;
+
+        // Store full transcription data with segments for each server
+        const transcriptionData = {
+            voxtral: null,
+            parakeet: null,
+            faster: null
+        };
 
         // Load audio files from server on page load
         async function loadAudioFiles() {
@@ -349,10 +425,28 @@
                     break;
 
                 case 'transcription':
-                    console.log(`✅ ${serverName} transcription received`);
+                    console.log(`✅ ${serverName} transcription received`, data);
                     rowElement.classList.remove('active');
                     textElement.className = 'transcription-text';
-                    textElement.textContent = data.text.trim();
+
+                    // Store full transcription data
+                    transcriptionData[serverName] = {
+                        text: data.text.trim(),
+                        segments: data.segments || [],
+                        performance: data.performance || {},
+                        timestamp: new Date().toISOString()
+                    };
+
+                    // Render text with word timestamps if available
+                    if (data.segments && data.segments.length > 0) {
+                        textElement.innerHTML = renderTranscriptionWithTooltips(data.segments);
+                        console.log(`✓ ${serverName}: Rendered ${data.segments.length} segments with timestamps`);
+                    } else {
+                        textElement.textContent = data.text.trim();
+                    }
+
+                    // Enable download button
+                    document.getElementById(`download-${serverName}`).disabled = false;
 
                     if (data.performance) {
                         statsElement.innerHTML = `
@@ -399,6 +493,83 @@
                 return pcmData;
             } catch (error) {
                 console.error('Error loading audio:', error);
+                return null;
+            }
+        }
+
+        // Progressive download and transcription
+        async function transcribeProgressively() {
+            const btn = document.getElementById('btnTranscribe');
+            btn.disabled = true;
+            btn.textContent = 'Downloading & Transcribing...';
+
+            try {
+                const audioPlayer = document.getElementById('audioPlayer');
+                const audioSrc = audioPlayer.src || audioPlayer.currentSrc;
+                console.log(`Progressive loading from: ${audioSrc}`);
+
+                const response = await fetch(audioSrc);
+                const reader = response.body.getReader();
+                const contentLength = +response.headers.get('Content-Length') || 0;
+
+                let receivedLength = 0;
+                let chunks = [];
+
+                // Read stream in chunks - download FULL file before transcription
+                while (true) {
+                    const {done, value} = await reader.read();
+
+                    if (done) break;
+
+                    chunks.push(value);
+                    receivedLength += value.length;
+
+                    const percent = contentLength ? ((receivedLength / contentLength) * 100).toFixed(1) : '?';
+                    btn.textContent = `Downloading ${percent}%...`;
+                }
+
+                // Final processing with complete file
+                const fullData = new Uint8Array(receivedLength);
+                let position = 0;
+                for (let chunk of chunks) {
+                    fullData.set(chunk, position);
+                    position += chunk.length;
+                }
+
+                btn.textContent = 'Decoding complete file...';
+                const audioContext = new AudioContext();
+                const audioBuffer = await audioContext.decodeAudioData(fullData.buffer);
+                const pcmData = convertToPCM16(audioBuffer);
+
+                // Send to servers
+                const chunkSize = 32000;
+                for (let i = 0; i < pcmData.byteLength; i += chunkSize) {
+                    const chunk = pcmData.slice(i, Math.min(i + chunkSize, pcmData.byteLength));
+                    Object.values(connections).forEach(ws => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(chunk);
+                        }
+                    });
+                }
+
+                // Request transcription
+                setTimeout(() => {
+                    Object.entries(connections).forEach(([name, ws]) => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'transcribe' }));
+                        }
+                    });
+                    btn.disabled = false;
+                    btn.textContent = 'Transcribe Again';
+                }, 1000);
+
+                audioData = pcmData;
+                return pcmData;
+
+            } catch (error) {
+                console.error('Progressive transcription error:', error);
+                btn.disabled = false;
+                btn.textContent = 'Transcribe Now (All Servers)';
                 return null;
             }
         }
@@ -490,6 +661,71 @@
             return pcm16.buffer;
         }
 
+        // Helper function to format timestamp for display
+        function formatTimestamp(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = (seconds % 60).toFixed(2);
+            return `${mins}:${secs.padStart(5, '0')}`;
+        }
+
+        // Render transcription with word-level timestamp tooltips
+        function renderTranscriptionWithTooltips(segments) {
+            let html = '';
+
+            segments.forEach((segment, segIdx) => {
+                // Check if segment has word-level timestamps
+                if (segment.words && segment.words.length > 0) {
+                    // Render each word with tooltip
+                    segment.words.forEach((wordData, wordIdx) => {
+                        const word = wordData.word || wordData.text || '';
+                        const start = wordData.start || wordData.timestamp?.[0] || 0;
+                        const end = wordData.end || wordData.timestamp?.[1] || start;
+
+                        html += `<span class="word-with-timestamp">`;
+                        html += `${word}`;
+                        html += `<span class="timestamp-tooltip">${formatTimestamp(start)} - ${formatTimestamp(end)}</span>`;
+                        html += `</span> `;
+                    });
+                } else {
+                    // No word timestamps, just render segment text
+                    const text = segment.text || '';
+                    if (segment.timestamp) {
+                        // Segment-level timestamp available
+                        const start = segment.timestamp[0];
+                        const end = segment.timestamp[1];
+                        html += `<span class="word-with-timestamp">`;
+                        html += `${text}`;
+                        html += `<span class="timestamp-tooltip">${formatTimestamp(start)} - ${formatTimestamp(end)}</span>`;
+                        html += `</span> `;
+                    } else {
+                        html += text + ' ';
+                    }
+                }
+            });
+
+            return html.trim();
+        }
+
+        // Download transcription as JSON
+        function downloadTranscriptJSON(serverName) {
+            const data = transcriptionData[serverName];
+            if (!data) {
+                alert('No transcription data available');
+                return;
+            }
+
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transcription-${serverName}-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
         // Audio selection change handler
         const audioSelect = document.getElementById('audioSelect');
         audioSelect.addEventListener('change', (e) => {
@@ -514,10 +750,15 @@
                 textElement.textContent = 'Waiting for audio...';
                 rowElement.classList.remove('active');
                 statsElement.innerHTML = '';
+
+                // Clear stored data and disable download
+                transcriptionData[server.name] = null;
+                document.getElementById(`download-${server.name}`).disabled = true;
             });
         });
 
-        document.getElementById('btnTranscribe').addEventListener('click', transcribeNow);
+        // Use progressive transcription by default for better UX
+        document.getElementById('btnTranscribe').addEventListener('click', transcribeProgressively);
 
         // File upload function
         async function uploadFile() {

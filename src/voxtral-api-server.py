@@ -41,6 +41,7 @@ audio_buffers = {}
 window_positions = {}  # Track window positions for each client
 full_transcripts = {}  # Store accumulated full transcript per client
 last_window_starts = {}  # Track last window start position for each client
+completed_transcripts = {}  # Store text from completed windows (before current window)
 
 def merge_with_overlap(existing_text, new_text, max_overlap_words=50):
     """
@@ -77,26 +78,136 @@ def merge_with_overlap(existing_text, new_text, max_overlap_words=50):
         return (existing_text + " " + new_text).strip()
 
 def extract_last_sentence(text):
-    """Extract the last sentence from text."""
+    """
+    Extract the last sentence(s) from text using regex-based sentence splitting.
+    Applies heuristic: if last sentence has ≤3 words, include previous sentences.
+    - Last sentence ≤3 words + previous >3 words = return last 2 sentences
+    - Last sentence ≤3 words + previous ≤3 words = return last 3 sentences (max)
+    - Last sentence >3 words = return only last sentence
+    """
     if not text.strip():
         return ""
 
     import re
-    sentences = re.split(r'[.!?]+', text.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
+    # Match sentence endings: period/!/? followed by space and capital letter
+    parts = re.split(r'(?<=[.!?])\s+(?=[A-ZÄÖÜ])', text.strip())
+    parts = [s.strip() for s in parts if s.strip()]
 
-    if sentences:
-        last_sent = sentences[-1]
+    if not parts:
+        return text.strip()
+
+    # First, handle date/abbreviation fragments (e.g., "19. November")
+    if len(parts) >= 2:
+        last_part = parts[-1]
+        prev_part = parts[-2]
+
+        if len(prev_part) < 10 and prev_part.endswith('.'):
+            prev_without_period = prev_part[:-1].replace('.', '')
+            if prev_without_period.isdigit() or len(prev_part.split()) == 1:
+                # Merge the fragment with the following sentence
+                parts[-2] = prev_part + " " + last_part
+                parts.pop()  # Remove the last part (now merged)
+
+    # Now apply the word count heuristic
+    last_sentence = parts[-1]
+    last_word_count = len(last_sentence.split())
+
+    if last_word_count <= 3 and len(parts) > 1:
+        # Last sentence has ≤3 words, check previous
+        prev_sentence = parts[-2]
+        prev_word_count = len(prev_sentence.split())
+
+        if prev_word_count <= 3 and len(parts) > 2:
+            # Both last and previous have ≤3 words, return last 3 sentences
+            result = " ".join(parts[-3:])
+        else:
+            # Previous has >3 words, return last 2 sentences
+            result = " ".join(parts[-2:])
+    else:
+        # Last sentence has >3 words, return only it
+        result = last_sentence
+
+    # Make sure result has proper punctuation
+    if result and result[-1] not in '.!?':
         if text.strip().endswith('.'):
-            last_sent += '.'
+            result += '.'
         elif text.strip().endswith('!'):
-            last_sent += '!'
+            result += '!'
         elif text.strip().endswith('?'):
-            last_sent += '?'
-        return last_sent
-    return text.strip()
+            result += '?'
 
-async def transcribe_with_mistral(audio_path, language="de"):
+    return result
+
+def chunk_audio_with_overlap(audio_array, sample_rate=16000, chunk_seconds=30, overlap_seconds=3):
+    """
+    Split audio into overlapping chunks for efficient processing.
+
+    Args:
+        audio_array: Numpy array of audio samples
+        sample_rate: Sample rate in Hz (default 16000)
+        chunk_seconds: Length of each chunk in seconds (default 30)
+        overlap_seconds: Overlap between chunks in seconds (default 3)
+
+    Returns:
+        List of audio chunks with metadata
+    """
+    chunk_samples = chunk_seconds * sample_rate
+    overlap_samples = overlap_seconds * sample_rate
+    stride = chunk_samples - overlap_samples
+
+    chunks = []
+    for start_idx in range(0, len(audio_array), stride):
+        end_idx = min(start_idx + chunk_samples, len(audio_array))
+        chunk = audio_array[start_idx:end_idx]
+
+        # Store metadata for intelligent merging
+        chunks.append({
+            'audio': chunk,
+            'start_time': start_idx / sample_rate,
+            'end_time': end_idx / sample_rate,
+            'is_first': start_idx == 0,
+            'is_last': end_idx >= len(audio_array)
+        })
+
+    return chunks
+
+def merge_transcriptions(chunk_results, overlap_seconds=3):
+    """
+    Intelligently merge transcriptions from overlapping chunks.
+    Removes duplicate text in overlapping regions.
+    """
+    if not chunk_results:
+        return ""
+
+    if len(chunk_results) == 1:
+        return chunk_results[0]['text']
+
+    merged_text = chunk_results[0]['text']
+
+    for i in range(1, len(chunk_results)):
+        current_text = chunk_results[i]['text']
+
+        # Simple word-based merging: take last ~10 words from previous,
+        # first ~10 words from current, find overlap
+        prev_words = merged_text.split()
+        curr_words = current_text.split()
+
+        # Find overlap by checking last N words of previous against first M words of current
+        overlap_found = False
+        for overlap_len in range(min(15, len(prev_words), len(curr_words)), 0, -1):
+            if prev_words[-overlap_len:] == curr_words[:overlap_len]:
+                # Found overlap, merge by taking current from after overlap
+                merged_text = merged_text + " " + " ".join(curr_words[overlap_len:])
+                overlap_found = True
+                break
+
+        if not overlap_found:
+            # No overlap found, just concatenate with space
+            merged_text = merged_text + " " + current_text
+
+    return merged_text.strip()
+
+async def transcribe_with_mistral(audio_path, language="de", return_timestamps=False):
     """Transcribe audio using Mistral's Voxtral API"""
     try:
         client = Mistral(api_key=api_key)
@@ -112,6 +223,8 @@ async def transcribe_with_mistral(audio_path, language="de"):
                 language=language if language != "german" else "de"
             )
 
+        # Voxtral API doesn't support response_format parameter
+        # Just return the text - timestamps not available from this API
         return transcription_response.text
     except Exception as e:
         print(f"[Mistral API] Error: {e}")
@@ -123,6 +236,7 @@ async def handle_client(websocket):
     window_positions[client_id] = 0  # Track current window end position
     full_transcripts[client_id] = ""  # Accumulated full transcript
     last_window_starts[client_id] = None  # Track last window start position
+    completed_transcripts[client_id] = ""  # Text from completed windows
 
     print(f"Client {client_id} connected")
 
@@ -161,7 +275,7 @@ async def handle_client(websocket):
                     }))
 
                 elif data.get("type") == "transcribe":
-                    # Full transcription (AoD mode)
+                    # Full transcription (VoD mode)
                     if not audio_buffers[client_id]:
                         await websocket.send(json.dumps({
                             "type": "error",
@@ -184,17 +298,72 @@ async def handle_client(websocket):
                         audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
                         audio_duration = len(audio_data) / (16000 * 2)
 
-                        print(f"[Voxtral] Transcribing {audio_duration:.1f}s of audio")
+                        # Use chunked processing for long audio files (> 60 seconds)
+                        CHUNK_THRESHOLD = 60  # seconds
 
-                        # Save to temporary WAV file
-                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                            tmp_path = tmp.name
-                            sf.write(tmp_path, audio_np, 16000)
+                        if audio_duration > CHUNK_THRESHOLD:
+                            print(f"[Voxtral] Long audio detected ({audio_duration:.1f}s), using chunked processing")
 
-                        # Transcribe with Mistral API
-                        text = await transcribe_with_mistral(tmp_path, language="de")
+                            # Split into chunks
+                            chunks_data = chunk_audio_with_overlap(
+                                audio_np,
+                                sample_rate=16000,
+                                chunk_seconds=30,
+                                overlap_seconds=3
+                            )
 
-                        os.unlink(tmp_path)
+                            chunk_results = []
+
+                            # Process each chunk
+                            for i, chunk_data in enumerate(chunks_data):
+                                chunk_audio = chunk_data['audio']
+                                chunk_duration = len(chunk_audio) / 16000
+
+                                # Save chunk to temp file
+                                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                                    tmp_path = tmp.name
+                                    sf.write(tmp_path, chunk_audio, 16000)
+
+                                # Transcribe chunk
+                                chunk_start = datetime.now()
+                                chunk_text = await transcribe_with_mistral(tmp_path, language="de")
+                                chunk_time = (datetime.now() - chunk_start).total_seconds()
+
+                                os.unlink(tmp_path)
+
+                                chunk_results.append({
+                                    'text': chunk_text,
+                                    'start_time': chunk_data['start_time'],
+                                    'end_time': chunk_data['end_time']
+                                })
+
+                                print(f"[Voxtral] Chunk {i+1}/{len(chunks_data)}: {chunk_duration:.1f}s → {chunk_time:.2f}s ({chunk_duration/chunk_time:.1f}x RT) - {chunk_text[:50]}...")
+
+                                # Send progress update
+                                progress_pct = ((i + 1) / len(chunks_data)) * 100
+                                await websocket.send(json.dumps({
+                                    "type": "processing",
+                                    "message": f"Processing chunk {i+1}/{len(chunks_data)} ({progress_pct:.0f}%)",
+                                    "progress": progress_pct
+                                }))
+
+                            # Merge all transcriptions
+                            text = merge_transcriptions(chunk_results, overlap_seconds=3)
+                            print(f"[Voxtral] Merged {len(chunks_data)} chunks into final transcription")
+
+                        else:
+                            # Original code for short audio (< 60 seconds)
+                            print(f"[Voxtral] Short audio ({audio_duration:.1f}s), using standard processing")
+
+                            # Save to temporary WAV file
+                            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                                tmp_path = tmp.name
+                                sf.write(tmp_path, audio_np, 16000)
+
+                            # Transcribe with Mistral API
+                            text = await transcribe_with_mistral(tmp_path, language="de")
+
+                            os.unlink(tmp_path)
 
                         processing_time = (datetime.now() - start_time).total_seconds()
                         rtfx = audio_duration / processing_time if processing_time > 0 else 0
@@ -292,22 +461,24 @@ async def handle_client(websocket):
 
                         # Growing window (same start) vs new window (different start)
                         if window_start_time == last_window_starts[client_id]:
-                            # Growing window - REPLACE transcript (re-transcribing same audio)
-                            full_transcripts[client_id] = window_text
-                            print(f"[Voxtral Stream] Growing window - replacing transcript")
+                            # Growing window - keep completed portion, replace current window portion
+                            full_transcripts[client_id] = completed_transcripts[client_id] + window_text
+                            print(f"[Voxtral Stream] Growing window - keeping completed ({len(completed_transcripts[client_id])} chars) + new window")
                         else:
-                            # New window - MERGE with overlap detection
+                            # New window - merge previous full transcript into completed, start new window
                             if full_transcripts[client_id]:
-                                full_transcripts[client_id] = merge_with_overlap(
+                                # Merge the previous window's text into completed transcripts
+                                completed_transcripts[client_id] = merge_with_overlap(
+                                    completed_transcripts[client_id],
                                     full_transcripts[client_id],
-                                    window_text,
                                     max_overlap_words=100  # Larger window for 2s overlap
                                 )
-                                print(f"[Voxtral Stream] New window - merging with overlap detection")
-                            else:
-                                # First window ever
-                                full_transcripts[client_id] = window_text
-                                print(f"[Voxtral Stream] First window - initializing transcript")
+                                print(f"[Voxtral Stream] New window - merged previous window into completed")
+
+                            # Now start the new window
+                            full_transcripts[client_id] = completed_transcripts[client_id] + window_text
+                            print(f"[Voxtral Stream] New window - completed ({len(completed_transcripts[client_id])} chars) + new window")
+
                             # Update last window start
                             last_window_starts[client_id] = window_start_time
 
@@ -353,6 +524,7 @@ async def handle_client(websocket):
                     window_positions[client_id] = 0
                     full_transcripts[client_id] = ""
                     last_window_starts[client_id] = None
+                    completed_transcripts[client_id] = ""
                     await websocket.send(json.dumps({
                         "type": "cleared",
                         "message": "Audio buffer cleared"
@@ -369,6 +541,8 @@ async def handle_client(websocket):
             del full_transcripts[client_id]
         if client_id in last_window_starts:
             del last_window_starts[client_id]
+        if client_id in completed_transcripts:
+            del completed_transcripts[client_id]
 
 async def main():
     print("\n" + "="*60)

@@ -42,5 +42,5 @@
   "theme_color": "#667eea",
   "background_color": "#667eea",
   "display": "standalone",
-  "start_url": "/audio-playout-transcription.html"
+  "start_url": "/vod-transcription.html"
 }

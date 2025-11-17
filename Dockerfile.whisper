@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04
 
 WORKDIR /app
 
@@ -17,7 +17,9 @@ RUN pip install --no-cache-dir \
     soundfile \
     scipy \
     faster-whisper \
-    spacy
+    spacy \
+    torch \
+    "cuda-python>=12.3.0"
 
 # Download German spaCy model
 RUN python3 -m spacy download de_core_news_sm
@@ -28,5 +30,5 @@ COPY src/whisper-gpu-server.py .
 # Expose port
 EXPOSE 5001
 
-# Run server
-CMD ["python3", "whisper-gpu-server.py"]
+# Run server with unbuffered output
+CMD ["python3", "-u", "whisper-gpu-server.py"]

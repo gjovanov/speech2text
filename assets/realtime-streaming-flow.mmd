@@ -1,5 +1,5 @@
 flowchart TD
-    Start([User Opens App]) --> LoadPage[Load audio-streaming-transcription.html]
+    Start([User Opens App]) --> LoadPage[Load live-transcription.html]
     LoadPage --> Connect{Connect to<br/>3 Servers}
 
     Connect -->|WebSocket| Server1[Voxtral :5000]
