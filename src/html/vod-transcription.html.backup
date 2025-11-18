@@ -790,6 +790,545 @@
         // ==================================================================
 
         // Placeholder - RAG classes now loaded from modules
+        class BrowserRAG_REMOVED {
+            constructor() {
+                this.embedder = null;
+                this.knowledgeBase = [];
+                this.isInitialized = false;
+            }
+
+            async initialize() {
+                try {
+                    console.log('🔄 Initializing RAG embeddings model (this may take a minute)...');
+
+                    // Use multilingual-e5-small for browser (supports German, ~130MB)
+                    this.embedder = await window.transformersPipeline(
+                        'feature-extraction',
+                        'Xenova/multilingual-e5-small'
+                    );
+
+                    console.log('✅ Embedding model loaded');
+
+                    // Load existing knowledge base from localStorage
+                    this.loadFromStorage();
+
+                    this.isInitialized = true;
+                    console.log(`✅ RAG system initialized with ${this.knowledgeBase.length} examples`);
+
+                } catch (error) {
+                    console.error('❌ RAG initialization failed:', error);
+                    throw error;
+                }
+            }
+
+            loadFromStorage() {
+                try {
+                    const savedCorrections = localStorage.getItem('transcriptionCorrections');
+                    if (savedCorrections) {
+                        const corrections = JSON.parse(savedCorrections);
+                        this.knowledgeBase = corrections.map(c => ({
+                            id: c.id,
+                            asrOutput: c.originalText,
+                            correctedText: c.correctedText,
+                            metadata: {
+                                serverName: c.serverName,
+                                audioFile: c.audioFile,
+                                timestamp: c.timestamp
+                            },
+                            embedding: null // Will be generated on-demand
+                        }));
+                        console.log(`✅ Loaded ${this.knowledgeBase.length} corrections from storage`);
+                    }
+                } catch (error) {
+                    console.error('Error loading knowledge base:', error);
+                }
+            }
+
+            saveToStorage() {
+                try {
+                    const corrections = this.knowledgeBase.map(item => ({
+                        id: item.id,
+                        originalText: item.asrOutput,
+                        correctedText: item.correctedText,
+                        serverName: item.metadata.serverName,
+                        audioFile: item.metadata.audioFile,
+                        timestamp: item.metadata.timestamp
+                    }));
+                    localStorage.setItem('transcriptionCorrections', JSON.stringify(corrections));
+                    console.log(`💾 Saved ${corrections.length} corrections to storage`);
+                } catch (error) {
+                    console.error('Error saving knowledge base:', error);
+                }
+            }
+
+            async addCorrection(asrOutput, correctedText, metadata = {}) {
+                const item = {
+                    id: this.generateUUID(),
+                    asrOutput,
+                    correctedText,
+                    metadata: {
+                        ...metadata,
+                        timestamp: metadata.timestamp || new Date().toISOString()
+                    },
+                    embedding: null
+                };
+
+                this.knowledgeBase.push(item);
+                this.saveToStorage();
+
+                // Generate embedding in background if initialized
+                if (this.isInitialized && this.embedder) {
+                    try {
+                        const embedding = await this.embedder(asrOutput, {
+                            pooling: 'mean',
+                            normalize: true
+                        });
+                        item.embedding = Array.from(embedding.data);
+                        console.log(`✅ Added correction with embedding (total: ${this.knowledgeBase.length})`);
+                    } catch (error) {
+                        console.error('Error generating embedding:', error);
+                    }
+                } else {
+                    console.log(`✅ Added correction without embedding (total: ${this.knowledgeBase.length})`);
+                }
+            }
+
+            async retrieveSimilar(query, topK = 3) {
+                if (!this.isInitialized) {
+                    console.warn('⚠️ RAG system not initialized');
+                    return [];
+                }
+
+                if (this.knowledgeBase.length === 0) {
+                    console.warn('⚠️ Knowledge base is empty');
+                    return [];
+                }
+
+                try {
+                    // Generate query embedding
+                    const queryEmbedding = await this.embedder(query, {
+                        pooling: 'mean',
+                        normalize: true
+                    });
+
+                    const queryVector = Array.from(queryEmbedding.data);
+
+                    // Generate embeddings for items that don't have them
+                    for (let item of this.knowledgeBase) {
+                        if (!item.embedding) {
+                            const embedding = await this.embedder(item.asrOutput, {
+                                pooling: 'mean',
+                                normalize: true
+                            });
+                            item.embedding = Array.from(embedding.data);
+                        }
+                    }
+
+                    // Cosine similarity search
+                    const similarities = this.knowledgeBase.map((item) => ({
+                        ...item,
+                        similarity: this.cosineSimilarity(queryVector, item.embedding)
+                    }));
+
+                    // Sort by similarity and return top-k
+                    const topResults = similarities
+                        .sort((a, b) => b.similarity - a.similarity)
+                        .slice(0, topK);
+
+                    console.log(`🔍 Retrieved ${topResults.length} similar examples (top similarity: ${(topResults[0]?.similarity || 0).toFixed(3)})`);
+
+                    return topResults;
+
+                } catch (error) {
+                    console.error('Error retrieving similar examples:', error);
+                    return [];
+                }
+            }
+
+            cosineSimilarity(a, b) {
+                const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
+                const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+                const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+                return dotProduct / (magA * magB);
+            }
+
+            generateUUID() {
+                return Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            }
+
+            getStats() {
+                return {
+                    totalExamples: this.knowledgeBase.length,
+                    isInitialized: this.isInitialized
+                };
+            }
+
+            clear() {
+                this.knowledgeBase = [];
+                this.saveToStorage();
+                console.log('🗑️ Knowledge base cleared');
+            }
+        }
+
+        // ==================================================================
+        // GERMAN TEXT PROCESSOR
+        // ==================================================================
+
+        class GermanTextProcessor {
+            detectErrorPatterns(asrOutput, correctedText) {
+                const patterns = [];
+
+                // Simple word-level comparison
+                const asrWords = asrOutput.split(' ');
+                const correctedWords = correctedText.split(' ');
+
+                asrWords.forEach((word, i) => {
+                    const correctedWord = correctedWords[i];
+                    if (correctedWord &&
+                        word.toLowerCase() === correctedWord.toLowerCase() &&
+                        word !== correctedWord) {
+                        patterns.push({
+                            type: 'capitalization',
+                            from: word,
+                            to: correctedWord
+                        });
+                    }
+                });
+
+                return patterns;
+            }
+        }
+
+        // ==================================================================
+        // LLM CORRECTORS - Local and Cloud-based
+        // ==================================================================
+
+        /**
+         * LocalLLMCorrector - Browser-based correction using Transformers.js
+         * Uses Qwen2.5-0.5B-Instruct model for German text correction
+         */
+        class LocalLLMCorrector {
+            constructor() {
+                this.generator = null;
+                this.isInitialized = false;
+                this.modelType = 'qwen'; // 'qwen' or 'flan-t5'
+                this.modelName = 'Qwen2.5-0.5B-Instruct';
+            }
+
+            async initialize() {
+                console.log('🔄 Initializing Local LLM (Qwen2.5-0.5B, ~500MB download)...');
+                console.log('⏳ This may take a few minutes on first load...');
+
+                try {
+                    // Try to use Qwen2.5-0.5B-Instruct first (best for German)
+                    // Xenova maintains converted models that work with Transformers.js
+                    try {
+                        this.generator = await window.transformersPipeline(
+                            'text-generation',
+                            'onnx-community/Qwen2.5-0.5B-Instruct',
+                            {
+                                dtype: 'q4',
+                                device: 'wasm'
+                            }
+                        );
+                        this.modelType = 'qwen';
+                        this.modelName = 'Qwen2.5-0.5B-Instruct';
+                        console.log('✅ Loaded Qwen2.5-0.5B-Instruct');
+                    } catch (qwenError) {
+                        console.warn('⚠️ Qwen model not available, falling back to Flan-T5:', qwenError.message);
+                        // Fallback to Flan-T5 if Qwen fails
+                        this.generator = await window.transformersPipeline(
+                            'text2text-generation',
+                            'Xenova/flan-t5-small'
+                        );
+                        this.modelType = 'flan-t5';
+                        this.modelName = 'Flan-T5-Small';
+                        console.log('✅ Loaded Flan-T5-Small (fallback)');
+                    }
+
+                    this.isInitialized = true;
+                    console.log('✅ Local LLM ready');
+                    return true;
+
+                } catch (error) {
+                    console.error('❌ Local LLM initialization failed:', error);
+                    this.isInitialized = false;
+                    return false;
+                }
+            }
+
+            async correct(asrText, similarExamples, germanPrompt) {
+                if (!this.isInitialized) {
+                    throw new Error('Local LLM not initialized. Call initialize() first.');
+                }
+
+                try {
+                    let result;
+                    let correctedText;
+
+                    if (this.modelType === 'qwen') {
+                        // Qwen works better with chat-style prompts
+                        const messages = [
+                            {
+                                role: 'system',
+                                content: 'Du bist ein Experte für deutsche Transkriptionskorrektur. Korrigiere Rechtschreibung, Großschreibung und zusammengesetzte Wörter.'
+                            },
+                            {
+                                role: 'user',
+                                content: germanPrompt
+                            }
+                        ];
+
+                        result = await this.generator(messages, {
+                            max_new_tokens: 200,
+                            temperature: 0.3,
+                            do_sample: false
+                        });
+
+                        // Extract generated text from Qwen response
+                        correctedText = result[0].generated_text.trim();
+
+                    } else {
+                        // Flan-T5 works better with simple task descriptions
+                        const simplePrompt = `Correct this German transcription, fixing capitalization, spelling, and compound words:\n\n${asrText}`;
+
+                        result = await this.generator(simplePrompt, {
+                            max_new_tokens: 200,
+                            temperature: 0.3
+                        });
+
+                        correctedText = result[0].generated_text.trim();
+                    }
+
+                    return {
+                        correctedText: correctedText,
+                        confidence: 0.7, // Local models have lower confidence
+                        provider: 'local',
+                        model: this.modelName
+                    };
+
+                } catch (error) {
+                    console.error('❌ Local LLM correction failed:', error);
+                    throw error;
+                }
+            }
+        }
+
+        /**
+         * APILLMCorrector - Cloud-based correction using OpenAI, Anthropic, or Mistral
+         */
+        class APILLMCorrector {
+            constructor(provider, apiKey, model) {
+                this.provider = provider;
+                this.apiKey = apiKey;
+                this.model = model;
+            }
+
+            async correct(asrText, similarExamples, germanPrompt) {
+                if (!this.apiKey) {
+                    throw new Error('API key not configured');
+                }
+
+                try {
+                    let response;
+
+                    switch (this.provider) {
+                        case 'openai':
+                            response = await this.callOpenAI(germanPrompt);
+                            break;
+                        case 'anthropic':
+                            response = await this.callAnthropic(germanPrompt);
+                            break;
+                        case 'mistral':
+                            response = await this.callMistral(germanPrompt);
+                            break;
+                        default:
+                            throw new Error(`Unknown provider: ${this.provider}`);
+                    }
+
+                    return response;
+
+                } catch (error) {
+                    console.error(`❌ ${this.provider} API call failed:`, error);
+                    throw error;
+                }
+            }
+
+            async callOpenAI(prompt) {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: this.model,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'You are a German transcription correction expert. Fix ASR errors while preserving the original meaning.'
+                            },
+                            {
+                                role: 'user',
+                                content: prompt
+                            }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 500
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`OpenAI API error: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const correctedText = data.choices[0].message.content.trim();
+
+                return {
+                    correctedText: correctedText,
+                    confidence: 0.9,
+                    provider: 'openai',
+                    model: this.model
+                };
+            }
+
+            async callAnthropic(prompt) {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': this.apiKey,
+                        'anthropic-version': '2023-06-01'
+                    },
+                    body: JSON.stringify({
+                        model: this.model,
+                        max_tokens: 500,
+                        temperature: 0.3,
+                        messages: [
+                            {
+                                role: 'user',
+                                content: prompt
+                            }
+                        ]
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Anthropic API error: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const correctedText = data.content[0].text.trim();
+
+                return {
+                    correctedText: correctedText,
+                    confidence: 0.95,
+                    provider: 'anthropic',
+                    model: this.model
+                };
+            }
+
+            async callMistral(prompt) {
+                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: this.model,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'You are a German transcription correction expert. Fix ASR errors while preserving the original meaning.'
+                            },
+                            {
+                                role: 'user',
+                                content: prompt
+                            }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 500
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Mistral API error: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const correctedText = data.choices[0].message.content.trim();
+
+                return {
+                    correctedText: correctedText,
+                    confidence: 0.9,
+                    provider: 'mistral',
+                    model: this.model
+                };
+            }
+        }
+
+        // ==================================================================
+        // GERMAN PROMPT ENGINEERING
+        // ==================================================================
+
+        /**
+         * Build a German-specific correction prompt with RAG examples
+         */
+        function buildGermanCorrectionPrompt(asrText, similarExamples) {
+            let prompt = `Du bist ein Experte für die Korrektur deutscher Transkriptionen. Korrigiere die folgenden ASR-Fehler:
+
+1. Rechtschreibung und Grammatik
+2. Deutsche Großschreibung (Substantive, etc.)
+3. Zusammengesetzte Wörter
+4. Zahlen und Datumsangaben
+5. Umlaute (ä, ö, ü, ß)
+
+`;
+
+            // Add similar examples if available
+            if (similarExamples && similarExamples.length > 0) {
+                prompt += `BEISPIELE von vorherigen Korrekturen:\n\n`;
+
+                similarExamples.forEach((example, idx) => {
+                    prompt += `Beispiel ${idx + 1}:\n`;
+                    prompt += `ASR: "${example.asrOutput}"\n`;
+                    prompt += `Korrigiert: "${example.correctedText}"\n\n`;
+                });
+            }
+
+            prompt += `Jetzt korrigiere diesen Text:\n\nASR: "${asrText}"\n\nKorrigiert:`;
+
+            return prompt;
+        }
+
+        // Global RAG system instances
+        let ragSystem = null;
+        let textProcessor = null;
+        let llmCorrector = null;
+
+        // Initialize RAG system on page load
+        async function initializeRAGSystem() {
+            try {
+                console.log('🔄 Initializing RAG system...');
+
+                ragSystem = new BrowserRAG();
+                textProcessor = new GermanTextProcessor();
+
+                // Initialize embeddings in background (don't block page load)
+                setTimeout(() => {
+                    ragSystem.initialize().catch(err => {
+                        console.warn('RAG embeddings not loaded:', err);
+                    });
+                }, 2000);
+
+                console.log('✅ RAG system classes created');
+
+            } catch (error) {
+                console.error('❌ RAG system creation failed:', error);
+            }
+        }
 
         // Store full transcription data with segments for each server
         const transcriptionData = {
@@ -1336,11 +1875,569 @@
         // ==================================================================
 
         // Manual edit function
+        function manualEdit(serverName) {
+            const textEl = document.getElementById(`text-${serverName}`);
+            const originalText = textEl.textContent.trim();
 
-        // Initialize WebSocket connections on load
-        // (RAG system is initialized via rag-init.js module above)
+            if (!originalText || originalText === 'Waiting for audio...') {
+                alert('No transcription to edit');
+                return;
+            }
+
+            // Store original text for potential revert
+            textEl.dataset.originalText = originalText;
+
+            // Make text editable
+            textEl.contentEditable = true;
+            textEl.focus();
+
+            // Change button
+            const btn = document.getElementById(`edit-${serverName}`);
+            btn.textContent = '💾 Save';
+            btn.className = 'edit-btn success';
+            btn.onclick = () => saveManualEdit(serverName);
+        }
+
+        function saveManualEdit(serverName) {
+            const textEl = document.getElementById(`text-${serverName}`);
+            const editedText = textEl.textContent.trim();
+            const originalText = textEl.dataset.originalText;
+
+            textEl.contentEditable = false;
+            textEl.className = 'transcription-text edited-segment';
+
+            // Reset button
+            const btn = document.getElementById(`edit-${serverName}`);
+            btn.textContent = '✏️ Edit';
+            btn.className = 'edit-btn secondary';
+            btn.onclick = () => manualEdit(serverName);
+
+            // Save to localStorage if changed
+            if (editedText !== originalText) {
+                saveCorrection(serverName, originalText, editedText);
+                console.log(`✅ Manual edit saved for ${serverName}`);
+            }
+
+            delete textEl.dataset.originalText;
+        }
+
+        // Save correction to localStorage and RAG system
+        async function saveCorrection(serverName, originalText, correctedText) {
+            try {
+                // Detect error patterns
+                const patterns = textProcessor ? textProcessor.detectErrorPatterns(originalText, correctedText) : [];
+
+                // Add to RAG system if available
+                if (ragSystem) {
+                    await ragSystem.addCorrection(originalText, correctedText, {
+                        serverName: serverName,
+                        audioFile: document.getElementById('audioSelect')?.value || 'unknown',
+                        errorPatterns: patterns
+                    });
+                } else {
+                    // Fallback to manual localStorage save
+                    let corrections = JSON.parse(localStorage.getItem('transcriptionCorrections') || '[]');
+                    corrections.push({
+                        id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+                        serverName: serverName,
+                        originalText: originalText,
+                        correctedText: correctedText,
+                        timestamp: new Date().toISOString(),
+                        audioFile: document.getElementById('audioSelect')?.value || 'unknown'
+                    });
+                    localStorage.setItem('transcriptionCorrections', JSON.stringify(corrections));
+                }
+
+                console.log(`💾 Saved correction to RAG knowledge base`);
+            } catch (error) {
+                console.error('Error saving correction:', error);
+            }
+        }
+
+        // ==================================================================
+        // AI CORRECTION WITH RAG
+        // ==================================================================
+
+        /**
+         * Main RAG correction workflow:
+         * 1. Retrieve similar examples from knowledge base
+         * 2. Build German prompt with examples
+         * 3. Call LLM (local or API) for correction
+         * 4. Show diff and let user accept/reject
+         */
+        async function aiCorrect(serverName) {
+            const textEl = document.getElementById(`text-${serverName}`);
+            const originalText = textEl.textContent.trim();
+            const btn = document.getElementById(`ai-correct-${serverName}`);
+
+            if (!originalText || originalText === 'Waiting for audio...') {
+                alert('⚠️ No transcription available to correct');
+                return;
+            }
+
+            try {
+                // Show loading state
+                btn.disabled = true;
+                btn.textContent = '⏳ Correcting...';
+
+                // Load settings
+                const settings = JSON.parse(localStorage.getItem('ragSettings') || JSON.stringify(defaultRAGSettings));
+
+                // Initialize LLM corrector if needed
+                if (!llmCorrector) {
+                    if (settings.provider === 'local') {
+                        llmCorrector = new LocalLLMCorrector();
+                        const initialized = await llmCorrector.initialize();
+                        if (!initialized) {
+                            throw new Error('Failed to initialize local LLM');
+                        }
+                    } else {
+                        llmCorrector = new APILLMCorrector(
+                            settings.provider,
+                            settings.apiKey,
+                            settings.apiModel
+                        );
+                    }
+                }
+
+                // Step 1: Retrieve similar examples from RAG system
+                console.log('🔍 Step 1: Retrieving similar examples from knowledge base...');
+                let similarExamples = [];
+
+                if (ragSystem && ragSystem.isInitialized && ragSystem.knowledgeBase.length > 0) {
+                    similarExamples = await ragSystem.retrieveSimilar(originalText, settings.topK);
+
+                    // Filter by minimum similarity
+                    similarExamples = similarExamples.filter(ex => ex.similarity >= settings.minSimilarity);
+
+                    console.log(`📚 Found ${similarExamples.length} similar examples (threshold: ${settings.minSimilarity})`);
+
+                    if (similarExamples.length > 0) {
+                        similarExamples.forEach((ex, idx) => {
+                            console.log(`  ${idx + 1}. Similarity: ${ex.similarity.toFixed(3)} - "${ex.asrOutput.substring(0, 50)}..."`);
+                        });
+                    }
+                } else {
+                    console.log('📚 No knowledge base examples available (starting fresh)');
+                }
+
+                // Step 2: Build German prompt with RAG examples
+                console.log('📝 Step 2: Building German correction prompt...');
+                const prompt = buildGermanCorrectionPrompt(originalText, similarExamples);
+
+                // Step 3: Call LLM for correction
+                console.log(`🤖 Step 3: Calling ${settings.provider} LLM for correction...`);
+                const result = await llmCorrector.correct(originalText, similarExamples, prompt);
+
+                console.log(`✅ LLM correction received (confidence: ${result.confidence})`);
+                console.log(`   Original: "${originalText}"`);
+                console.log(`   Corrected: "${result.correctedText}"`);
+
+                // Step 4: Show diff and let user accept/reject
+                showCorrectionDiff(serverName, originalText, result.correctedText, result);
+
+            } catch (error) {
+                console.error('❌ AI correction failed:', error);
+                alert(`❌ AI correction failed: ${error.message}`);
+
+            } finally {
+                // Reset button state
+                btn.disabled = false;
+                btn.textContent = '🤖 AI Correct';
+            }
+        }
+
+        /**
+         * Show correction diff with accept/reject buttons
+         */
+        function showCorrectionDiff(serverName, originalText, correctedText, result) {
+            const diffEl = document.getElementById(`diff-${serverName}`);
+            const textEl = document.getElementById(`text-${serverName}`);
+
+            // Store data for accept/reject
+            diffEl.dataset.originalText = originalText;
+            diffEl.dataset.correctedText = correctedText;
+
+            // Build confidence badge
+            const confidenceBadge = result.confidence >= 0.9 ?
+                `<span class="confidence-badge high">High Confidence: ${(result.confidence * 100).toFixed(0)}%</span>` :
+                result.confidence >= 0.7 ?
+                `<span class="confidence-badge medium">Medium Confidence: ${(result.confidence * 100).toFixed(0)}%</span>` :
+                `<span class="confidence-badge low">Low Confidence: ${(result.confidence * 100).toFixed(0)}%</span>`;
+
+            diffEl.innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <strong>🤖 AI Correction Result</strong>
+                    ${confidenceBadge}
+                    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">Provider: ${result.provider} (${result.model})</span>
+                </div>
+
+                <div class="diff-original">
+                    <strong>Original ASR:</strong>
+                    <div>${escapeHtml(originalText)}</div>
+                </div>
+
+                <div class="diff-corrected">
+                    <strong>AI Corrected:</strong>
+                    <div>${escapeHtml(correctedText)}</div>
+                </div>
+
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    <button class="edit-btn success" onclick="acceptCorrection('${serverName}')">✅ Accept</button>
+                    <button class="edit-btn danger" onclick="rejectCorrection('${serverName}')">❌ Reject</button>
+                    <button class="edit-btn secondary" onclick="editBeforeAccept('${serverName}')">✏️ Edit Before Accept</button>
+                </div>
+            `;
+
+            diffEl.style.display = 'block';
+
+            // Scroll to diff
+            diffEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        /**
+         * Accept the AI correction
+         */
+        async function acceptCorrection(serverName) {
+            const diffEl = document.getElementById(`diff-${serverName}`);
+            const textEl = document.getElementById(`text-${serverName}`);
+            const originalText = diffEl.dataset.originalText;
+            const correctedText = diffEl.dataset.correctedText;
+
+            // Update text
+            textEl.textContent = correctedText;
+            textEl.className = 'transcription-text edited-segment';
+
+            // Save to knowledge base
+            await saveCorrection(serverName, originalText, correctedText);
+
+            // Hide diff
+            diffEl.style.display = 'none';
+
+            console.log(`✅ Accepted AI correction for ${serverName}`);
+        }
+
+        /**
+         * Reject the AI correction
+         */
+        function rejectCorrection(serverName) {
+            const diffEl = document.getElementById(`diff-${serverName}`);
+            diffEl.style.display = 'none';
+
+            console.log(`❌ Rejected AI correction for ${serverName}`);
+        }
+
+        /**
+         * Edit the AI suggestion before accepting
+         */
+        function editBeforeAccept(serverName) {
+            const diffEl = document.getElementById(`diff-${serverName}`);
+            const textEl = document.getElementById(`text-${serverName}`);
+            const originalText = diffEl.dataset.originalText;
+            const correctedText = diffEl.dataset.correctedText;
+
+            // Set text to AI suggestion
+            textEl.textContent = correctedText;
+
+            // Hide diff
+            diffEl.style.display = 'none';
+
+            // Store original for later
+            textEl.dataset.originalText = originalText;
+
+            // Make editable
+            textEl.contentEditable = true;
+            textEl.focus();
+
+            // Change button to Save
+            const btn = document.getElementById(`edit-${serverName}`);
+            btn.textContent = '💾 Save';
+            btn.className = 'edit-btn success';
+            btn.onclick = () => saveManualEdit(serverName);
+
+            console.log(`✏️ Editing AI suggestion for ${serverName}`);
+        }
+
+        // Enable edit buttons when transcription completes
+        function enableEditButton(serverName) {
+            const editBtn = document.getElementById(`edit-${serverName}`);
+            const aiCorrectBtn = document.getElementById(`ai-correct-${serverName}`);
+
+            if (editBtn) {
+                editBtn.disabled = false;
+            }
+            if (aiCorrectBtn) {
+                aiCorrectBtn.disabled = false;
+            }
+        }
+
+        // ==================================================================
+        // KNOWLEDGE BASE MANAGEMENT UI
+        // ==================================================================
+
+        function toggleKBPanel() {
+            const panel = document.getElementById('kbPanelContent');
+            const icon = document.getElementById('kb-toggle-icon');
+
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                icon.textContent = '▲';
+                refreshKBStats();
+            } else {
+                panel.style.display = 'none';
+                icon.textContent = '▼';
+            }
+        }
+
+        function refreshKBStats() {
+            if (!ragSystem) {
+                console.warn('RAG system not initialized');
+                return;
+            }
+
+            const stats = ragSystem.getStats();
+
+            document.getElementById('kb-count').textContent = stats.totalExamples;
+            document.getElementById('kb-embeddings-status').textContent = stats.isInitialized ? '✅ Loaded' : '⏳ Loading...';
+            document.getElementById('kb-updated').textContent =
+                ragSystem.knowledgeBase.length > 0
+                    ? new Date(Math.max(...ragSystem.knowledgeBase.map(item => new Date(item.metadata.timestamp)))).toLocaleString()
+                    : 'Never';
+
+            // Update list
+            renderKBList();
+        }
+
+        function renderKBList() {
+            const listEl = document.getElementById('kbList');
+            if (!ragSystem || ragSystem.knowledgeBase.length === 0) {
+                listEl.innerHTML = '<p style="color: #666; font-style: italic; text-align: center; padding: 20px;">No corrections in knowledge base yet. Edit a transcription to add your first example!</p>';
+                return;
+            }
+
+            // Show most recent 10
+            const recent = ragSystem.knowledgeBase.slice(-10).reverse();
+
+            listEl.innerHTML = recent.map((item, idx) => `
+                <div class="kb-item">
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 8px;">
+                        <strong>#${ragSystem.knowledgeBase.length - idx}</strong> •
+                        ${new Date(item.metadata.timestamp).toLocaleString()} •
+                        ${item.metadata.serverName || 'unknown'}
+                        ${item.embedding ? ' • <span style="color: #28a745;">✓ Has embedding</span>' : ' • <span style="color: #dc3545;">⚠ No embedding</span>'}
+                    </div>
+                    <div style="margin: 8px 0; padding: 8px; background: #f8d7da; border-radius: 4px;">
+                        <strong style="font-size: 0.85em; color: #721c24;">Original ASR:</strong><br>
+                        <span style="color: #333;">${escapeHtml(item.asrOutput)}</span>
+                    </div>
+                    <div style="margin: 8px 0; padding: 8px; background: #d4edda; border-radius: 4px;">
+                        <strong style="font-size: 0.85em; color: #155724;">Corrected:</strong><br>
+                        <span style="color: #333;">${escapeHtml(item.correctedText)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function exportKnowledgeBase() {
+            if (!ragSystem) {
+                alert('RAG system not initialized');
+                return;
+            }
+
+            const exportData = {
+                version: '1.0',
+                exportDate: new Date().toISOString(),
+                totalExamples: ragSystem.knowledgeBase.length,
+                corrections: ragSystem.knowledgeBase.map(item => ({
+                    id: item.id,
+                    asrOutput: item.asrOutput,
+                    correctedText: item.correctedText,
+                    metadata: item.metadata
+                    // Don't export embeddings (can regenerate)
+                }))
+            };
+
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+                type: 'application/json'
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `rag_knowledge_base_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            console.log('📤 Knowledge base exported');
+            alert(`✅ Exported ${exportData.totalExamples} corrections`);
+        }
+
+        async function importKnowledgeBase() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+
+                    if (!data.corrections || !Array.isArray(data.corrections)) {
+                        throw new Error('Invalid knowledge base format');
+                    }
+
+                    // Merge with existing KB
+                    let imported = 0;
+                    for (const correction of data.corrections) {
+                        await ragSystem.addCorrection(
+                            correction.asrOutput,
+                            correction.correctedText,
+                            correction.metadata || {}
+                        );
+                        imported++;
+                    }
+
+                    alert(`✅ Imported ${imported} examples into knowledge base`);
+                    refreshKBStats();
+
+                } catch (error) {
+                    console.error('Import error:', error);
+                    alert('❌ Import failed: ' + error.message);
+                }
+            };
+
+            input.click();
+        }
+
+        function clearKnowledgeBase() {
+            if (!ragSystem) {
+                alert('RAG system not initialized');
+                return;
+            }
+
+            if (!confirm('⚠️ This will delete all correction examples from the knowledge base. Are you sure?')) {
+                return;
+            }
+
+            ragSystem.clear();
+            refreshKBStats();
+
+            alert('✅ Knowledge base cleared');
+        }
+
+        // ==================================================================
+        // RAG Settings Modal Functions
+        // ==================================================================
+
+        // Default RAG settings
+        const defaultRAGSettings = {
+            provider: 'local',
+            apiKey: '',
+            apiModel: '',
+            topK: 3,
+            minSimilarity: 0.5,
+            autoCorrect: false,
+            confidenceThreshold: 0.8
+        };
+
+        // Model options for each provider
+        const providerModels = {
+            openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
+            anthropic: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'],
+            mistral: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest']
+        };
+
+        function openRAGSettings() {
+            // Load saved settings
+            const settings = JSON.parse(localStorage.getItem('ragSettings') || JSON.stringify(defaultRAGSettings));
+
+            // Populate form
+            document.querySelector(`input[name="llmProvider"][value="${settings.provider}"]`).checked = true;
+            document.getElementById('apiKey').value = settings.apiKey || '';
+            document.getElementById('topK').value = settings.topK;
+            document.getElementById('minSimilarity').value = settings.minSimilarity;
+            document.getElementById('autoCorrect').checked = settings.autoCorrect;
+            document.getElementById('confidenceThreshold').value = settings.confidenceThreshold;
+
+            // Update provider-specific settings
+            updateProviderSettings();
+
+            // Show modal
+            document.getElementById('ragSettingsModal').style.display = 'flex';
+        }
+
+        function closeRAGSettings() {
+            document.getElementById('ragSettingsModal').style.display = 'none';
+        }
+
+        function updateProviderSettings() {
+            const provider = document.querySelector('input[name="llmProvider"]:checked').value;
+            const apiSettings = document.getElementById('apiSettings');
+            const modelSelect = document.getElementById('apiModel');
+
+            if (provider === 'local') {
+                apiSettings.style.display = 'none';
+            } else {
+                apiSettings.style.display = 'block';
+
+                // Populate model dropdown
+                const models = providerModels[provider] || [];
+                modelSelect.innerHTML = models.map(model =>
+                    `<option value="${model}">${model}</option>`
+                ).join('');
+
+                // Load saved model if available
+                const settings = JSON.parse(localStorage.getItem('ragSettings') || '{}');
+                if (settings.apiModel && models.includes(settings.apiModel)) {
+                    modelSelect.value = settings.apiModel;
+                }
+            }
+        }
+
+        function updateAutoCorrectSettings() {
+            const autoCorrect = document.getElementById('autoCorrect').checked;
+            document.getElementById('autoCorrectSettings').style.display = autoCorrect ? 'block' : 'none';
+        }
+
+        function saveRAGSettings() {
+            const provider = document.querySelector('input[name="llmProvider"]:checked').value;
+            const settings = {
+                provider: provider,
+                apiKey: provider === 'local' ? '' : document.getElementById('apiKey').value,
+                apiModel: provider === 'local' ? '' : document.getElementById('apiModel').value,
+                topK: parseInt(document.getElementById('topK').value),
+                minSimilarity: parseFloat(document.getElementById('minSimilarity').value),
+                autoCorrect: document.getElementById('autoCorrect').checked,
+                confidenceThreshold: parseFloat(document.getElementById('confidenceThreshold').value)
+            };
+
+            // Validate API key for cloud providers
+            if (provider !== 'local' && !settings.apiKey) {
+                alert('⚠️ Please enter an API key for the selected provider');
+                return;
+            }
+
+            // Save to localStorage
+            localStorage.setItem('ragSettings', JSON.stringify(settings));
+
+            console.log('✅ RAG settings saved:', settings);
+            alert('✅ Settings saved successfully!');
+
+            closeRAGSettings();
+        }
+
+        // Initialize on load
         window.addEventListener('load', () => {
             initializeConnections();
+            initializeRAGSystem();
         });
     </script>
 </body>
