@@ -570,7 +570,7 @@
                 <div class="transcription-header">
                     <div>
                         <span class="server-name parakeet">🚀 Parakeet TDT</span>
-                        <span class="model-info">nvidia/parakeet-tdt-0.6b-v2 • Port 5002 • English-optimized</span>
+                        <span class="model-info">nvidia/parakeet-tdt-0.6b-v3 • Port 5002 • German-optimized</span>
                     </div>
                     <div class="edit-controls">
                         <button class="download-btn" onclick="downloadTranscriptJSON('parakeet')" id="download-parakeet" disabled>📥 Download JSON</button>
@@ -1332,10 +1332,21 @@
         }
 
         // ==================================================================
-        // MANUAL EDITING FUNCTIONS
+        // HELPER FUNCTIONS (Called from WebSocket handlers)
         // ==================================================================
 
-        // Manual edit function
+        // Enable edit and AI correct buttons when transcription completes
+        function enableEditButton(serverName) {
+            const editBtn = document.getElementById(`edit-${serverName}`);
+            const aiCorrectBtn = document.getElementById(`ai-correct-${serverName}`);
+
+            if (editBtn) {
+                editBtn.disabled = false;
+            }
+            if (aiCorrectBtn) {
+                aiCorrectBtn.disabled = false;
+            }
+        }
 
         // Initialize WebSocket connections on load
         // (RAG system is initialized via rag-init.js module above)

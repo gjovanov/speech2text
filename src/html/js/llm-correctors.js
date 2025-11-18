@@ -10,40 +10,24 @@ export class LocalLLMCorrector {
     constructor() {
         this.generator = null;
         this.isInitialized = false;
-        this.modelType = 'qwen'; // 'qwen' or 'flan-t5'
-        this.modelName = 'Qwen2.5-0.5B-Instruct';
+        this.modelType = 'flan-t5';
+        this.modelName = 'Flan-T5-Small';
     }
 
     async initialize() {
-        console.log('🔄 Initializing Local LLM (Qwen2.5-0.5B, ~500MB download)...');
-        console.log('⏳ This may take a few minutes on first load...');
+        console.log('🔄 Initializing Local LLM (Flan-T5-Small, ~300MB download)...');
+        console.log('⏳ This may take a minute on first load...');
 
         try {
-            // Try to use Qwen2.5-0.5B-Instruct first (best for German)
-            // onnx-community maintains converted models that work with Transformers.js
-            try {
-                this.generator = await window.transformersPipeline(
-                    'text-generation',
-                    'onnx-community/Qwen2.5-0.5B-Instruct',
-                    {
-                        dtype: 'q4',
-                        device: 'wasm'
-                    }
-                );
-                this.modelType = 'qwen';
-                this.modelName = 'Qwen2.5-0.5B-Instruct';
-                console.log('✅ Loaded Qwen2.5-0.5B-Instruct');
-            } catch (qwenError) {
-                console.warn('⚠️ Qwen model not available, falling back to Flan-T5:', qwenError.message);
-                // Fallback to Flan-T5 if Qwen fails
-                this.generator = await window.transformersPipeline(
-                    'text2text-generation',
-                    'Xenova/flan-t5-small'
-                );
-                this.modelType = 'flan-t5';
-                this.modelName = 'Flan-T5-Small';
-                console.log('✅ Loaded Flan-T5-Small (fallback)');
-            }
+            // Use Flan-T5-Small - works reliably with Transformers.js
+            // Good for text correction tasks, supports German
+            this.generator = await window.transformersPipeline(
+                'text2text-generation',
+                'Xenova/flan-t5-small'
+            );
+            this.modelType = 'flan-t5';
+            this.modelName = 'Flan-T5-Small';
+            console.log('✅ Loaded Flan-T5-Small');
 
             this.isInitialized = true;
             console.log('✅ Local LLM ready');
@@ -62,42 +46,15 @@ export class LocalLLMCorrector {
         }
 
         try {
-            let result;
-            let correctedText;
+            // Flan-T5 works best with simple, direct task descriptions
+            const simplePrompt = `Correct this German transcription, fixing capitalization, spelling, and compound words:\n\n${asrText}`;
 
-            if (this.modelType === 'qwen') {
-                // Qwen works better with chat-style prompts
-                const messages = [
-                    {
-                        role: 'system',
-                        content: 'Du bist ein Experte für deutsche Transkriptionskorrektur. Korrigiere Rechtschreibung, Großschreibung und zusammengesetzte Wörter.'
-                    },
-                    {
-                        role: 'user',
-                        content: germanPrompt
-                    }
-                ];
+            const result = await this.generator(simplePrompt, {
+                max_new_tokens: 200,
+                temperature: 0.3
+            });
 
-                result = await this.generator(messages, {
-                    max_new_tokens: 200,
-                    temperature: 0.3,
-                    do_sample: false
-                });
-
-                // Extract generated text from Qwen response
-                correctedText = result[0].generated_text.trim();
-
-            } else {
-                // Flan-T5 works better with simple task descriptions
-                const simplePrompt = `Correct this German transcription, fixing capitalization, spelling, and compound words:\n\n${asrText}`;
-
-                result = await this.generator(simplePrompt, {
-                    max_new_tokens: 200,
-                    temperature: 0.3
-                });
-
-                correctedText = result[0].generated_text.trim();
-            }
+            const correctedText = result[0].generated_text.trim();
 
             return {
                 correctedText: correctedText,

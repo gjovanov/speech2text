@@ -68,10 +68,11 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-        limits:
           memory: 2G
+        limits:
+          memory: 4G
     ipc: host
-    shm_size: '2gb'
+    shm_size: '4gb'
     ulimits:
       memlock: -1
       stack: 67108864

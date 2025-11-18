@@ -369,6 +369,17 @@
             border-left: 3px solid #667eea;
         }
     </style>
+
+    <!-- Transformers.js for browser-based RAG -->
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+
+        // Disable local model check to always use CDN
+        env.allowLocalModels = false;
+
+        // Make pipeline available globally
+        window.transformersPipeline = pipeline;
+    </script>
 </head>
 <body>
     <div class="container">
@@ -485,6 +496,14 @@
             </div>
         </div>
     </div>
+
+    <!-- RAG System Modules -->
+    <script type="module">
+        import { initRAG } from './js/rag-init.js';
+
+        // Initialize RAG system on page load
+        window.addEventListener('load', initRAG);
+    </script>
 
     <script>
         // Get WebSocket protocol and host dynamically

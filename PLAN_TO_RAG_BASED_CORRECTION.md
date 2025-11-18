@@ -1522,7 +1522,7 @@ Based on GEC-RAG research and German ASR benchmarks:
 ### **Models**
 - **Embeddings**: mixedbread-ai/deepset-mxbai-embed-de-large-v1, Xenova/multilingual-e5-small
 - **LLMs**: GPT-4o, Claude 3.5 Sonnet, Qwen2.5-0.5B-Instruct, Mistral Large
-- **ASR**: Whisper Large-v3, Parakeet-TDT-0.6B-v2, Voxtral
+- **ASR**: Whisper Large-v3, Parakeet-TDT-0.6B-v3, Voxtral
 
 ### **Tools & Libraries**
 - Transformers.js: https://xenova.github.io/transformers.js/

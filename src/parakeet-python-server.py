@@ -23,7 +23,9 @@ try:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Load Parakeet TDT model from NVIDIA (v3 supports multilingual including German)
+    # Load Parakeet TDT model from NVIDIA
+    # v3 is multilingual (25 European languages) with 8,192 token vocabulary
+    # Requires 4GB memory limit (larger tokenizer than v2's 1,024 tokens)
     model = nemo_asr.models.EncDecRNNTBPEModel.from_pretrained(
         "nvidia/parakeet-tdt-0.6b-v3"
     )
@@ -246,9 +248,9 @@ async def handle_client(websocket):
     # Send ready message
     await websocket.send(json.dumps({
         "type": "ready",
-        "message": f"Parakeet TDT ready (nvidia/parakeet-tdt-0.6b-v2 on {device_info})",
+        "message": f"Parakeet TDT ready (nvidia/parakeet-tdt-0.6b-v3 on {device_info})",
         "clientId": str(client_id),
-        "model": "parakeet-tdt-0.6b-v2",
+        "model": "parakeet-tdt-0.6b-v3",
         "device": device_info
     }))
 
@@ -562,7 +564,7 @@ async def main():
     print("🚀 Parakeet TDT WebSocket Server", flush=True)
     print("="*60, flush=True)
     print(f"URL: ws://localhost:5002/transcribe", flush=True)
-    print(f"Model: nvidia/parakeet-tdt-0.6b-v3 (Multilingual)", flush=True)
+    print(f"Model: nvidia/parakeet-tdt-0.6b-v3 (Multilingual - 25 languages)", flush=True)
     print(f"Device: {device_info}", flush=True)
     print(f"Optimization: Chunked processing for long audio (>60s)", flush=True)
     print("="*60 + "\n", flush=True)
