@@ -30,6 +30,12 @@ try:
         "nvidia/parakeet-tdt-0.6b-v3"
     )
 
+    # Enable timestamp generation (requires preserve_alignments=True)
+    # See: https://github.com/NVIDIA/NeMo/issues/14714
+    from omegaconf import open_dict
+    with open_dict(model.cfg.decoding):
+        model.cfg.decoding.preserve_alignments = True
+
     # Move to device and optimize
     if device == "cuda":
         model = model.cuda()
@@ -63,6 +69,79 @@ window_positions = {}  # Track window positions for each client
 full_transcripts = {}  # Store accumulated full transcript per client
 last_window_starts = {}  # Track last window start position for each client
 completed_transcripts = {}  # Store text from completed windows (before current window)
+
+def words_to_segments(word_timestamps, segment_gap_threshold=1.0):
+    """
+    Convert word timestamps to Whisper-compatible segments format.
+
+    Groups words into segments based on natural pauses (gaps > threshold).
+
+    Args:
+        word_timestamps: List of dicts with 'word', 'start', 'end'
+        segment_gap_threshold: Gap in seconds to start new segment (default 1.0)
+
+    Returns:
+        List of segments in Whisper format with 'id', 'start', 'end', 'text', 'words'
+    """
+    if not word_timestamps:
+        return []
+
+    segments = []
+    current_segment_words = []
+    segment_id = 0
+
+    for i, word_info in enumerate(word_timestamps):
+        # Start new segment if gap is large enough or first word
+        if not current_segment_words:
+            current_segment_words.append(word_info)
+        else:
+            last_end = current_segment_words[-1].get('end', 0)
+            current_start = word_info.get('start', 0)
+            gap = current_start - last_end
+
+            if gap > segment_gap_threshold:
+                # Finalize current segment
+                segment_text = ' '.join(w.get('word', '') for w in current_segment_words)
+                segments.append({
+                    'id': segment_id,
+                    'start': current_segment_words[0].get('start', 0),
+                    'end': current_segment_words[-1].get('end', 0),
+                    'text': segment_text.strip(),
+                    'words': [
+                        {
+                            'word': w.get('word', ''),
+                            'start': w.get('start', 0),
+                            'end': w.get('end', 0),
+                            'probability': 0.9  # Parakeet doesn't provide word confidence
+                        }
+                        for w in current_segment_words
+                    ]
+                })
+                segment_id += 1
+                current_segment_words = [word_info]
+            else:
+                current_segment_words.append(word_info)
+
+    # Finalize last segment
+    if current_segment_words:
+        segment_text = ' '.join(w.get('word', '') for w in current_segment_words)
+        segments.append({
+            'id': segment_id,
+            'start': current_segment_words[0].get('start', 0),
+            'end': current_segment_words[-1].get('end', 0),
+            'text': segment_text.strip(),
+            'words': [
+                {
+                    'word': w.get('word', ''),
+                    'start': w.get('start', 0),
+                    'end': w.get('end', 0),
+                    'probability': 0.9
+                }
+                for w in current_segment_words
+            ]
+        })
+
+    return segments
 
 def chunk_audio_with_overlap(audio_array, sample_rate=16000, chunk_seconds=30, overlap_seconds=3):
     """
@@ -333,17 +412,30 @@ async def handle_client(websocket):
                                     tmp_path = tmp.name
                                     sf.write(tmp_path, chunk_audio, 16000)
 
-                                # Transcribe chunk
+                                # Transcribe chunk with timestamps
                                 chunk_start = datetime.now()
-                                transcription = model.transcribe([tmp_path])
+                                transcription = model.transcribe([tmp_path], timestamps=True)
                                 chunk_time = (datetime.now() - chunk_start).total_seconds()
 
                                 chunk_text = transcription[0].text if transcription and len(transcription) > 0 else ""
 
+                                # Extract word timestamps and adjust for chunk offset
+                                chunk_word_timestamps = []
+                                if transcription and len(transcription) > 0 and hasattr(transcription[0], 'timestamp'):
+                                    word_ts = transcription[0].timestamp.get('word', [])
+                                    chunk_offset = chunk_data['start_time']
+                                    for word_info in word_ts:
+                                        chunk_word_timestamps.append({
+                                            'word': word_info.get('word', ''),
+                                            'start': word_info.get('start', 0) + chunk_offset,
+                                            'end': word_info.get('end', 0) + chunk_offset
+                                        })
+
                                 chunk_results.append({
                                     'text': chunk_text,
                                     'start_time': chunk_data['start_time'],
-                                    'end_time': chunk_data['end_time']
+                                    'end_time': chunk_data['end_time'],
+                                    'word_timestamps': chunk_word_timestamps
                                 })
 
                                 os.unlink(tmp_path)
@@ -362,6 +454,11 @@ async def handle_client(websocket):
                             text = merge_transcriptions(chunk_results, overlap_seconds=3)
                             print(f"[Parakeet] Merged {len(chunks)} chunks into final transcription")
 
+                            # Collect all word timestamps from chunks
+                            word_timestamps = []
+                            for chunk_result in chunk_results:
+                                word_timestamps.extend(chunk_result.get('word_timestamps', []))
+
                         else:
                             # Original code for short audio (< 60 seconds)
                             print(f"[Parakeet] Short audio ({audio_duration:.1f}s), using standard processing")
@@ -370,8 +467,20 @@ async def handle_client(websocket):
                                 tmp_path = tmp.name
                                 sf.write(tmp_path, audio_np, 16000)
 
-                            transcription = model.transcribe([tmp_path])
+                            transcription = model.transcribe([tmp_path], timestamps=True)
                             text = transcription[0].text if transcription and len(transcription) > 0 else ""
+
+                            # Extract word timestamps
+                            word_timestamps = []
+                            if transcription and len(transcription) > 0 and hasattr(transcription[0], 'timestamp'):
+                                word_ts = transcription[0].timestamp.get('word', [])
+                                for word_info in word_ts:
+                                    word_timestamps.append({
+                                        'word': word_info.get('word', ''),
+                                        'start': word_info.get('start', 0),
+                                        'end': word_info.get('end', 0)
+                                    })
+
                             os.unlink(tmp_path)
 
                         processing_time = (datetime.now() - start_time).total_seconds()
@@ -379,10 +488,13 @@ async def handle_client(websocket):
 
                         print(f"[Parakeet] Total: {audio_duration:.1f}s → {processing_time:.2f}s ({rtfx:.1f}x RT)")
 
+                        # Convert word timestamps to Whisper-compatible segments
+                        segments = words_to_segments(word_timestamps)
+
                         await websocket.send(json.dumps({
                             "type": "transcription",
                             "text": text,
-                            "segments": [],  # Parakeet TDT doesn't provide word-level timestamps
+                            "segments": segments,
                             "model": "parakeet-tdt-0.6b-v3",
                             "device": device_info,
                             "performance": {
